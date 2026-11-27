@@ -1,4 +1,4 @@
-import { GRASS_TUFT, STONE_FACE, WATER_LINE } from '../engine/atlas.ts';
+import { FINE_STROKE, STROKE_AXES, GRASS_TUFT, STONE_FACE, WATER_LINE } from '../engine/atlas.ts';
 import { TextOverlay, type OverlayArrow, type OverlayBar, type OverlayLabel } from '../engine/textOverlay.ts';
 import { ASP, clamp, hash, lerp, noise, TAU } from '../engine/util.ts';
 import { WebGLAsciiRenderer } from '../engine/webgl.ts';
@@ -13,16 +13,39 @@ import { T, WATERY, type TerrainId, type WorldObject } from '../world/types.ts';
 export const WORLD_SCALE_X = 4;
 export const WORLD_SCALE_Y = 2;
 
-// Full 58-character luminance-ordered typographic density ramps (exact "Senje" intricate masonry/bark/metal texture!)
-const RAMP_STONE = '.,:;!i><~+-?][}{)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
-const RAMP_METAL = '.,:;-=+*!?/|)(1jrxvczLJY0OQPDBKHM#%&8W@$';
-const RAMP_CLOTH = '.,:\'`^";!i~+_-?/|)(rxuvczmwqpdbkhao*#MW&8%B@';
-const RAMP_BARK = '.,:;!|/tfjrxnuvzqpdbkhaoO0Q8#MW&%B@$';
+// Sparse marks let light and larger material shapes carry the terrain.
+const RAMP_STONE = '.,:;-~=+#';
+const RAMP_METAL = '.:-/=+#';
+const RAMP_CLOTH = ".,'`:/|";
+const RAMP_BARK = ".'/:|}#";
 const RAMP_FOLIAGE = '.,\'"`^/\\|/\\|;vV*#';
 
 function pickRampChar(ramp: string, lum: number, variation = 0): number {
   const idx = clamp(Math.floor((lum + variation) * (ramp.length - 1)), 0, ramp.length - 1);
   return ramp.charCodeAt(idx);
+}
+
+function luminousStroke(spr: PixelSprite, x: number, y: number, flip: boolean): number {
+  let best = FINE_STROKE + 12;
+  let bestScore = 0;
+  for (let axis = 0; axis < STROKE_AXES.length; axis++) {
+    const [screenDx, dy] = STROKE_AXES[axis];
+    const dx = flip ? -screenDx : screenDx;
+    let ends = 0;
+    let score = 0;
+    for (const sign of [-1, 1]) {
+      const nx = x + sign * dx;
+      const ny = y + sign * dy;
+      if (nx < 0 || ny < 0 || nx >= spr.w || ny >= spr.h || spr.mat[ny * spr.w + nx] !== 3) continue;
+      ends |= sign < 0 ? 1 : 2;
+      score++;
+    }
+    if (score > bestScore) {
+      best = FINE_STROKE + axis * 3 + ends - 1;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 interface TerrainStyle {
@@ -289,9 +312,11 @@ export class SceneRenderer {
 
         const lum = clamp(r * 0.3 + g * 0.59 + b * 0.11, 0.08, 1);
         const mat = spr.mat[si];
-        const micro = (hash(i + Math.floor(wx * 7), j + Math.floor(wy * 7), 47) - 0.5) * 0.09;
+        const micro = (hash(i, j, 47) - 0.5) * 0.09;
         let code: number;
-        if (mat === 3) {
+        if (mat === 3 && opts.isEntity) {
+          code = luminousStroke(spr, i, j, flip);
+        } else if (mat === 3) {
           code = lum > 0.8 ? 64 : lum > 0.55 ? 42 : 43; // @ * +
         } else if (mat === 4) {
           // Feathery directional foliage blades (/|\'")
@@ -308,7 +333,7 @@ export class SceneRenderer {
 
         const idx = gy * cols + gx;
         // Slightly fuller dark background inside solid figure torso for clean silhouette readability
-        const bgK = opts.isEntity ? 0.22 : mat === 5 || mat === 2 ? 0.1 : 0.04;
+        const bgK = opts.isEntity ? (mat === 3 ? 0.08 : 0.30) : mat === 5 || mat === 2 ? 0.1 : 0.04;
         this.putCell(gx, gy, code, r, g, b, em, alpha, bgK);
         if (opts.isEntity) this.FL[idx] |= 8;
       }
@@ -479,7 +504,7 @@ export class SceneRenderer {
           r *= stoneShade;
           g *= stoneShade;
           b *= stoneShade * 1.04;
-          code = pickRampChar(RAMP_STONE, clamp(stoneShade * 0.72, 0.1, 0.92), (hv - 0.5) * 0.14);
+          code = isMortarV ? 58 : isMortarH ? 45 : hv < 0.22 ? 44 : 32;
         } else if (tp === T.STAIRS) {
           code = subY === 0 ? 61 : 45;
           const stepShade = subY === 0 ? 1.12 : 0.78;
@@ -529,9 +554,10 @@ export class SceneRenderer {
         this.BR[i] = r;
         this.BG[i] = g;
         this.BB[i] = b;
-        this.BGR[i] = r * st.bgK;
-        this.BGG[i] = g * st.bgK;
-        this.BGB[i] = b * st.bgK;
+        const groundFill = st.masonry ? 0.18 : st.bgK;
+        this.BGR[i] = r * groundFill;
+        this.BGG[i] = g * groundFill;
+        this.BGB[i] = b * groundFill;
         this.EM[i] = 0;
         this.HV[i] = hv;
       }
@@ -1125,16 +1151,13 @@ export class SceneRenderer {
         }
       }
 
-      for (const n of G.npcs) {
-        if (Math.abs(n.x - pxInterp) < 26 && Math.abs(n.y - pyInterp) < 16) {
-          labels.push({ wx: n.x, wy: n.y - 12.6, text: n.name, color: '#ffd98a', bg: 'rgba(3, 5, 8, 0.62)', size: 12 });
-        }
+      const npc = G.interact?.n;
+      if (npc) {
+        labels.push({ wx: npc.x, wy: npc.y - 12.6, text: npc.name, color: '#ffd98a', bg: 'rgba(3, 5, 8, 0.62)', size: 12 });
       }
-
-      for (const sp of W.signposts) {
-        if (Math.abs(sp.x - pxInterp) < 14 && Math.abs(sp.y - pyInterp) < 10) {
-          labels.push({ wx: sp.x + 0.5, wy: sp.y - 8.2, text: sp.text, color: '#e2d8c5', bg: 'rgba(3, 5, 8, 0.72)', size: 12 });
-        }
+      const sign = G.interact?.kind === 'signpost' ? G.interact.f : undefined;
+      if (sign?.text) {
+        labels.push({ wx: sign.x + 0.5, wy: sign.y - 8.2, text: sign.text, color: '#e2d8c5', bg: 'rgba(3, 5, 8, 0.72)', size: 12 });
       }
 
       for (const e of G.enemies) {

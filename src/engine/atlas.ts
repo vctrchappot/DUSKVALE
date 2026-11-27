@@ -17,11 +17,32 @@ export interface GlyphAtlas {
 export const GRASS_TUFT = 0xe000; // three lean directions, four silhouettes each
 export const STONE_FACE = GRASS_TUFT + 12; // four lightness bands, four faces each
 export const WATER_LINE = STONE_FACE + 16; // four broken bands
-const MATERIAL_END = WATER_LINE + 4;
+export const FINE_STROKE = WATER_LINE + 4;
+const MATERIAL_END = FINE_STROKE + 13;
+
+// Each axis connects to either or both neighbouring cells. An isolated point is an eye or glint.
+export const STROKE_AXES = [[1, 0], [0, 1], [1, 1], [1, -1]] as const;
+
+export function drawFineStroke(ctx: CanvasRenderingContext2D, code: number, x: number, y: number, w: number, h: number): void {
+  const stroke = code - FINE_STROKE;
+  if (stroke === 12) {
+    ctx.fillRect(x + w * 0.22, y + h * 0.38, w * 0.56, h * 0.24);
+    return;
+  }
+  const [dx, dy] = STROKE_AXES[Math.floor(stroke / 3)];
+  const ends = stroke % 3 + 1;
+  const start = ends & 1 ? -0.52 : -0.10;
+  const end = ends & 2 ? 0.52 : 0.10;
+  ctx.beginPath();
+  ctx.moveTo(x + w * (0.5 + dx * start), y + h * (0.5 + dy * start));
+  ctx.lineTo(x + w * (0.5 + dx * end), y + h * (0.5 + dy * end));
+  ctx.lineWidth = Math.max(w * 0.30, h * 0.18);
+  ctx.stroke();
+}
 
 export function materialFallback(code: number): string {
   if (code < STONE_FACE) return ['\\', '|', '/'][Math.floor((code - GRASS_TUFT) / 4)];
-  if (code < WATER_LINE) return ':oxQ'[Math.floor((code - STONE_FACE) / 4)];
+  if (code < WATER_LINE) return '.:-='[Math.floor((code - STONE_FACE) / 4)];
   return '-_=~'[code - WATER_LINE];
 }
 
@@ -42,14 +63,22 @@ function drawMaterial(ctx: CanvasRenderingContext2D, code: number, w: number, h:
     }
   } else if (code < WATER_LINE) {
     const band = Math.floor((code - STONE_FACE) / 4);
-    const letters = ['.,:;', 'crsn', 'qpdb', 'Q08B'][band];
-    ctx.font = `600 ${Math.round(h * 0.84)}px ${FONT_FAMILY}`;
-    ctx.fillText(letters[variant], w * 0.35, h * 0.46, w * 0.65);
-    ctx.globalAlpha = 0.62;
-    ctx.font = `500 ${Math.round(h * 0.55)}px ${FONT_FAMILY}`;
-    ctx.fillText(letters[(variant + 1) % 4], w * 0.82, h * 0.56, w * 0.38);
-    ctx.globalAlpha = 0.28;
-    ctx.fillRect(w * 0.08, h * 0.12, w * (0.36 + variant * 0.1), h * 0.08);
+    // A chipped upper lip and a recessed bedding plane follow the masonry course.
+    const chip = w * (0.14 + variant * 0.19);
+    ctx.globalAlpha = 0.40 + band * 0.12;
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.30);
+    ctx.lineTo(chip, h * 0.18);
+    ctx.lineTo(chip + w * 0.12, h * 0.32);
+    ctx.lineTo(w, h * 0.24);
+    ctx.lineTo(w, h * (0.39 + band * 0.06));
+    ctx.lineTo(0, h * 0.48);
+    ctx.fill();
+    ctx.globalAlpha = 0.22 + band * 0.055;
+    ctx.fillRect(chip, h * 0.70, w - chip, h * 0.11);
+  } else if (code >= FINE_STROKE) {
+    ctx.strokeStyle = '#fff';
+    drawFineStroke(ctx, code, 0, 0, w, h);
   } else {
     ctx.fillRect(w * (variant % 2) * 0.16, h * 0.42, w * (0.56 + variant * 0.12), h * 0.12);
     ctx.globalAlpha = 0.36;

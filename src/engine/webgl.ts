@@ -1,4 +1,4 @@
-import { createGlyphAtlas, GRASS_TUFT, materialFallback, type GlyphAtlas } from './atlas.ts';
+import { createGlyphAtlas, drawFineStroke, FINE_STROKE, GRASS_TUFT, materialFallback, type GlyphAtlas } from './atlas.ts';
 
 const VS_QUAD = `#version 300 es
 precision highp float;
@@ -457,7 +457,13 @@ export class WebGLAsciiRenderer {
         if (gid > 0) {
           ctx.fillStyle = `rgb(${p.fg[o]},${p.fg[o + 1]},${p.fg[o + 2]})`;
           const glyph = this.atlas.glyphs[gid];
-          ctx.fillText(glyph.charCodeAt(0) >= GRASS_TUFT ? materialFallback(glyph.charCodeAt(0)) : glyph, px + cw * 0.5, py + ch * 0.54);
+          const code = glyph.charCodeAt(0);
+          if (code >= FINE_STROKE) {
+            ctx.strokeStyle = ctx.fillStyle;
+            drawFineStroke(ctx, code, px, py, cw, ch);
+          } else {
+            ctx.fillText(code >= GRASS_TUFT ? materialFallback(code) : glyph, px + cw * 0.5, py + ch * 0.54);
+          }
         }
       }
     }
