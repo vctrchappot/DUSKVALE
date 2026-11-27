@@ -71,10 +71,8 @@ html, body {
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.85);
 }
 #portrait {
-  margin: 0;
-  font-size: 9px;
-  line-height: 1.05;
-  color: #e6e2d8;
+  width: 44px;
+  height: 56px;
   background: #030407;
   border: 1px solid rgba(242, 240, 234, 0.35);
   padding: 4px 6px;

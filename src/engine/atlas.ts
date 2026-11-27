@@ -18,7 +18,15 @@ export const GRASS_TUFT = 0xe000; // three lean directions, four silhouettes eac
 export const STONE_FACE = GRASS_TUFT + 12; // four lightness bands, four faces each
 export const WATER_LINE = STONE_FACE + 16; // four broken bands
 export const FINE_STROKE = WATER_LINE + 4;
-const MATERIAL_END = FINE_STROKE + 13;
+export const SHADED_TILE = FINE_STROKE + 13;
+const MATERIAL_END = SHADED_TILE + 64;
+
+// Six samples per cell describe the boundary between two shaded surfaces.
+export function drawShadedTile(ctx: CanvasRenderingContext2D, mask: number, x: number, y: number, w: number, h: number): void {
+  for (let bit = 0; bit < 6; bit++) {
+    if (mask & (1 << bit)) ctx.fillRect(x + (bit % 2) * w / 2, y + Math.floor(bit / 2) * h / 3, w / 2, h / 3);
+  }
+}
 
 // Each axis connects to either or both neighbouring cells. An isolated point is an eye or glint.
 export const STROKE_AXES = [[1, 0], [0, 1], [1, 1], [1, -1]] as const;
@@ -76,6 +84,8 @@ function drawMaterial(ctx: CanvasRenderingContext2D, code: number, w: number, h:
     ctx.fill();
     ctx.globalAlpha = 0.22 + band * 0.055;
     ctx.fillRect(chip, h * 0.70, w - chip, h * 0.11);
+  } else if (code >= SHADED_TILE) {
+    drawShadedTile(ctx, code - SHADED_TILE, 0, 0, w, h);
   } else if (code >= FINE_STROKE) {
     ctx.strokeStyle = '#fff';
     drawFineStroke(ctx, code, 0, 0, w, h);

@@ -1,9 +1,10 @@
-import { FINE_STROKE, STROKE_AXES, GRASS_TUFT, STONE_FACE, WATER_LINE } from '../engine/atlas.ts';
+import { buildKnightSprite, knightAnimationFrame } from '../game/knight.ts';
+import { SHADED_TILE, FINE_STROKE, STROKE_AXES, GRASS_TUFT, STONE_FACE, WATER_LINE } from '../engine/atlas.ts';
 import { TextOverlay, type OverlayArrow, type OverlayBar, type OverlayLabel } from '../engine/textOverlay.ts';
 import { ASP, clamp, hash, lerp, noise, TAU } from '../engine/util.ts';
 import { WebGLAsciiRenderer } from '../engine/webgl.ts';
 import type { EnemyEntity, Game, NpcEntity } from '../game/game.ts';
-import { buildCreatureSprite, buildKnightSprite, buildPropSprite, type AnimPose, type PixelSprite } from '../game/pixelSprites.ts';
+import { buildCreatureSprite, buildPropSprite, type AnimPose, type PixelSprite } from '../game/pixelSprites.ts';
 import { ARMORS, WEAPONS } from '../game/rpg.ts';
 import { ELITE_AFFIXES } from '../game/sideQuests.ts';
 import type { RemotePlayerEntity } from '../net/client.ts';
@@ -227,7 +228,7 @@ export class SceneRenderer {
     const rows = this.gl.gridRows;
     const cx = Math.round(wx * WORLD_SCALE_X) - this.camCellX;
     const cy = Math.round(wy * WORLD_SCALE_Y) - this.camCellY + (opts.liftCells ?? 0);
-    const sx0 = cx - spr.ax;
+    const sx0 = cx - (opts.flip && spr.detail ? spr.w - 1 - spr.ax : spr.ax);
     const sy0 = cy - spr.ay;
     if (sx0 > cols + 6 || sy0 > rows + 6 || sx0 + spr.w < -6 || sy0 + spr.h < -6) return;
 
@@ -238,8 +239,8 @@ export class SceneRenderer {
     const swayX = opts.swayX ?? 0;
 
     // 1. Soft dark ground shadow under sprite
-    const shRx = Math.max(3, Math.round(spr.w * 0.36));
-    const shRy = Math.max(1, Math.round(spr.w * 0.13));
+    const shRx = Math.max(3, spr.detail ? 5 : Math.round(spr.w * 0.36));
+    const shRy = Math.max(1, spr.detail ? 2 : Math.round(spr.w * 0.13));
     for (let dy = -shRy; dy <= shRy; dy++) {
       for (let dx = -shRx; dx <= shRx; dx++) {
         const d2 = (dx * dx) / (shRx * shRx) + (dy * dy) / (shRy * shRy);
@@ -268,6 +269,26 @@ export class SceneRenderer {
         const gx = sx0 + dx + rowSway;
         const gy = sy0 + j;
         if (gx < 0 || gy < 0 || gx >= cols || gy >= rows) continue;
+
+        if (spr.detail) {
+          const idx = gy * cols + gx;
+          const detail = spr.detail;
+          const bits = detail.mask[si];
+          const mask = flip ? ((bits & 21) << 1) | ((bits & 42) >> 1) : bits;
+          const edge = detail.cutout[si];
+          const accent = edge && rim ? 0.12 : 0;
+          const r = flash ? 1 : lerp(spr.r[si], rim?.[0] ?? 0, accent);
+          const g = flash ? 0.96 : lerp(spr.g[si], rim?.[1] ?? 0, accent);
+          const b = flash ? 0.9 : lerp(spr.b[si], rim?.[2] ?? 0, accent);
+          const underR = this.BGR[idx], underG = this.BGG[idx], underB = this.BGB[idx];
+          this.putCell(gx, gy, SHADED_TILE + mask, r, g, b, flash ? 0.8 : 0, alpha);
+          const ink = si * 3;
+          this.BGR[idx] = edge ? underR : lerp(underR, flash ? 0.7 : detail.ground[ink], alpha);
+          this.BGG[idx] = edge ? underG : lerp(underG, flash ? 0.6 : detail.ground[ink + 1], alpha);
+          this.BGB[idx] = edge ? underB : lerp(underB, flash ? 0.6 : detail.ground[ink + 2], alpha);
+          this.FL[idx] |= 8;
+          continue;
+        }
 
         const leftEmpty = i === 0 || !spr.a[si - 1];
         const rightEmpty = i === spr.w - 1 || !spr.a[si + 1];
@@ -333,7 +354,7 @@ export class SceneRenderer {
 
         const idx = gy * cols + gx;
         // Slightly fuller dark background inside solid figure torso for clean silhouette readability
-        const bgK = opts.isEntity ? (mat === 3 ? 0.08 : 0.30) : mat === 5 || mat === 2 ? 0.1 : 0.04;
+        const bgK = mat === 3 ? 0.10 : opts.isEntity ? 0.43 : mat === 4 ? 0.19 : 0.28;
         this.putCell(gx, gy, code, r, g, b, em, alpha, bgK);
         if (opts.isEntity) this.FL[idx] |= 8;
       }
@@ -792,7 +813,7 @@ export class SceneRenderer {
         else if (p.drink > 0) pose = 'drink';
         else if (p.atk > 0.04) pose = p.combo === 0 ? 'attack1' : p.combo === 1 ? 'attack2' : 'attack3';
         else if (p.moving) pose = 'walk';
-        const frame = pose === 'walk' ? Math.floor(p.walkT * 9) % 6 : Math.floor(t * 2.5) % 2;
+        const frame = knightAnimationFrame(pose, t, p.walkT, p.atk, weapon.speed * 0.9, p.roll);
         const spr = this.getCachedSprite(`pl:${armor.id}:${weapon.id}:${pose}:${frame}`, () =>
           buildKnightSprite(armor, weapon, pose, frame),
         );
@@ -1060,9 +1081,12 @@ export class SceneRenderer {
       for (let x = 0; x < cols; x++) {
         const i = y * cols + x;
         const e = this.EM[i];
-        const lr = this.LR[i] * (1 - e) + e;
-        const lg = this.LG[i] * (1 - e) + e;
-        const lb = this.LB[i] * (1 - e) + e;
+        // Preserve the painted shadow planes when several camp lights overlap.
+        const painted = this.CHR[i] >= SHADED_TILE;
+        const exposure = painted ? 0.82 / (0.8 + Math.max(this.LR[i], this.LG[i], this.LB[i]) * 0.78) : 1;
+        const lr = this.LR[i] * exposure * (1 - e) + e;
+        const lg = this.LG[i] * exposure * (1 - e) + e;
+        const lb = this.LB[i] * exposure * (1 - e) + e;
 
         let r = this.BR[i] * lr;
         let g = this.BG[i] * lg;
@@ -1120,7 +1144,7 @@ export class SceneRenderer {
       if (!G.player.dead) {
         labels.push({
           wx: pxInterp,
-          wy: pyInterp - 13.6,
+          wy: pyInterp - 14.6,
           text: `${G.options.playerName}`,
           color: '#f4f2ec',
           bg: 'rgba(3, 5, 8, 0.55)',
@@ -1132,7 +1156,7 @@ export class SceneRenderer {
         if (Math.abs(rp.x - pxInterp) < 34 && Math.abs(rp.y - pyInterp) < 22) {
           labels.push({
             wx: rp.x,
-            wy: rp.y - 13.6,
+            wy: rp.y - 14.6,
             text: `${rp.name}`,
             color: '#9ee2ff',
             bg: 'rgba(3, 5, 8, 0.55)',

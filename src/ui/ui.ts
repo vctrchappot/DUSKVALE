@@ -1,7 +1,7 @@
 import { cycleZoom, saveOptions, ZOOM_PX, type GameOptions } from '../engine/options.ts';
 import { ASP, clamp, TAU } from '../engine/util.ts';
 import { ENEMY_DEFS, type Game, type GameUICallbacks } from '../game/game.ts';
-import { buildPlayerPortraitAscii } from '../game/pixelSprites.ts';
+import { drawKnightPortrait } from '../game/knight.ts';
 import { ARMORS, RINGS, SKILLS, WEAPONS, weaponUpgradeCost, xpForNextLevel } from '../game/rpg.ts';
 import { RUNES, type RuneId } from '../game/sideQuests.ts';
 import type { SkillId } from '../game/types.ts';
@@ -28,6 +28,7 @@ export class GameUI implements GameUICallbacks {
   private readonly onStart: (slot: number, load: boolean) => void;
   private readonly onToTitle: () => void;
 
+  private portraitArmor = '';
   private bannerT = 0;
   private dLines: string[] = [];
   private dIdx = 0;
@@ -215,7 +216,10 @@ export class GameUI implements GameUICallbacks {
 
     if (playing) {
       const armor = ARMORS[p.armorId] || ARMORS.wanderer_plate;
-      this.el.portrait.textContent = buildPlayerPortraitAscii(armor);
+      if (this.portraitArmor !== armor.id) {
+        drawKnightPortrait(this.el.portrait as HTMLCanvasElement, armor, WEAPONS.iron_sword);
+        this.portraitArmor = armor.id;
+      }
       this.el.pLvl.textContent = `${G.options.playerName} · St. ${p.lvl}${p.attrPoints > 0 ? ` (+${p.attrPoints})` : ''}`;
 
       const maxHp = G.maxHp();

@@ -1,5 +1,4 @@
 import { clamp, hash, noise } from '../engine/util.ts';
-import type { ArmorDef, WeaponDef } from './types.ts';
 
 /**
  * High-resolution procedural PixelSprite rendered into dense typographic ASCII.
@@ -22,9 +21,10 @@ export interface PixelSprite {
   a: Uint8Array;
   em: Float32Array;
   mat: Uint8Array;
+  detail?: { mask: Uint8Array; ground: Float32Array; cutout: Uint8Array };
 }
 
-function makeSprite(w: number, h: number, ax?: number, ay?: number): PixelSprite {
+export function makeSprite(w: number, h: number, ax?: number, ay?: number): PixelSprite {
   const n = w * h;
   return {
     w,
@@ -172,109 +172,6 @@ function drawLine(
 }
 
 export type AnimPose = 'idle' | 'walk' | 'attack1' | 'attack2' | 'attack3' | 'roll' | 'drink' | 'parry';
-
-/**
- * High-Detail Dark-Fantasy Knight (18x25 cells) inspired by Senje:
- * Gleaming silver-steel helmet & cuirass, deep crimson cloak draping on the left,
- * crisp silhouette boots, and bright luminous sword blade angled cleanly out.
- */
-export function buildKnightSprite(
-  armor: ArmorDef,
-  weapon: WeaponDef,
-  pose: AnimPose,
-  frame: number,
-): PixelSprite {
-  const s = makeSprite(18, 25, 9, 24);
-
-  const steel = armor.steelColor;
-  const cloak = armor.cloakColor;
-  const trim = armor.trimColor;
-  const darkSteel: [number, number, number] = [steel[0] * 0.38, steel[1] * 0.4, steel[2] * 0.46];
-  const brightSteel: [number, number, number] = [Math.min(1, steel[0] * 1.25), Math.min(1, steel[1] * 1.25), Math.min(1, steel[2] * 1.28)];
-  const leather: [number, number, number] = [0.3, 0.22, 0.17];
-  const visor: [number, number, number] = [0.95, 0.88, 0.72];
-
-  if (pose === 'roll') {
-    fillEllipse(s, 9, 18, 4.6, 3.8, cloak, 0, 0);
-    fillEllipse(s, 9, 17, 3.0, 2.5, steel, 1, 0);
-    fillRect(s, 7, 17, 4, 1, trim, 1, 0.25);
-    return s;
-  }
-
-  const bob = pose === 'idle' ? (frame % 2 === 1 ? 1 : 0) : pose === 'walk' ? (frame % 2 === 0 ? -1 : 0) : 0;
-  const stride = pose === 'walk' ? Math.round(Math.sin(frame * 1.1) * 2.2) : 0;
-  const cloakSway = pose === 'walk' ? -1 - (frame % 2) : frame % 2 === 1 ? -1 : 0;
-
-  // Flowing crimson cloak draped behind & to left side (exact Senje silhouette!)
-  fillRect(s, 3 + cloakSway, 8 + bob, 6, 13, cloak, 0, 0);
-  fillRect(s, 2 + cloakSway, 12 + bob, 4, 9, cloak, 0, 0);
-  fillRect(s, 4 + cloakSway, 10 + bob, 1, 10, [cloak[0] * 1.32, cloak[1] * 1.15, cloak[2] * 1.15], 0, 0, false);
-  fillRect(s, 2 + cloakSway, 20 + bob, 7, 1, trim, 1, 0.15, false);
-
-  // Legs / articulated armored greaves + moonlit thigh highlights
-  const leftLegX = 6 - Math.max(0, stride);
-  const rightLegX = 9 + Math.max(0, stride);
-  fillRect(s, leftLegX, 16, 2, 8, darkSteel, 1, 0);
-  fillRect(s, rightLegX, 16, 3, 8, steel, 1, 0);
-  setPx(s, rightLegX, 17, brightSteel, 1.2, 1, 0.15);
-  setPx(s, rightLegX, 19, trim, 1.1, 1, 0.2);
-  fillRect(s, leftLegX, 23, 2, 1, leather, 0, 0);
-  fillRect(s, rightLegX, 23, 3, 1, leather, 0, 0);
-
-  // Breastplate cuirass + metallic specular sternum ridge + belt
-  fillRect(s, 6, 8 + bob, 6, 8, steel, 1, 0);
-  fillRect(s, 8, 8 + bob, 2, 5, brightSteel, 1, 0.12);
-  fillRect(s, 6, 14 + bob, 6, 1, leather, 0, 0);
-  fillRect(s, 8, 14 + bob, 2, 1, trim, 1, 0.3);
-
-  // Sculpted shoulder pauldrons with bright silver top ridge
-  fillEllipse(s, 5, 9 + bob, 2.2, 1.9, steel, 1, 0);
-  fillEllipse(s, 12, 9 + bob, 2.2, 1.9, steel, 1, 0);
-  setPx(s, 4, 8 + bob, brightSteel, 1.25, 1, 0.15);
-  setPx(s, 11, 8 + bob, brightSteel, 1.25, 1, 0.15);
-
-  // Gothic greathelm + gleaming crown + glowing visor slit
-  fillEllipse(s, 9, 4 + bob, 2.6, 2.9, steel, 1, 0);
-  fillRect(s, 7, 2 + bob, 3, 1, brightSteel, 1, 0.18);
-  fillRect(s, 8, 4 + bob, 3, 1, visor, 3, 0.85);
-
-  // Weapon — bright gleaming blade (silver-white/weapon glow angled cleanly like Image 1!)
-  const blade: [number, number, number] = [
-    Math.min(1, weapon.glowColor[0] * 0.75 + 0.35),
-    Math.min(1, weapon.glowColor[1] * 0.75 + 0.35),
-    Math.min(1, weapon.glowColor[2] * 0.75 + 0.35),
-  ];
-  if (pose === 'drink') {
-    fillRect(s, 11, 7 + bob, 2, 3, [1.0, 0.72, 0.24], 3, 1.0);
-  } else if (pose === 'parry') {
-    drawLine(s, 12, 4, 13, 18, [0.92, 0.97, 1.0], 2, 3, 1.0);
-    fillRect(s, 11, 10, 4, 1, trim, 1, 0.45);
-  } else if (pose === 'attack1' || pose === 'attack2' || pose === 'attack3') {
-    const ext = weapon.kind === 'spear' ? 6 : weapon.kind === 'greatsword' ? 5 : 4;
-    const yEnd = pose === 'attack2' ? 6 : pose === 'attack3' ? 18 : 12;
-    drawLine(s, 11, 12 + bob, 11 + ext, yEnd, blade, weapon.kind === 'greatsword' ? 2 : 1, 3, 1.0);
-    if (weapon.kind === 'scythe') {
-      drawLine(s, 11 + ext, yEnd, 11 + ext - 2, yEnd + 4, blade, 1, 3, 1.0);
-    }
-  } else {
-    // Low angled gleaming sword carried at ready (just like Senje in Image 1!)
-    if (weapon.kind === 'spear') {
-      drawLine(s, 12, 18 + bob, 15, 2 + bob, leather, 1, 5, 0);
-      drawLine(s, 15, 4 + bob, 16, 0 + bob, blade, 1, 3, 0.95);
-    } else if (weapon.kind === 'scythe') {
-      drawLine(s, 12, 17 + bob, 15, 3 + bob, leather, 1, 5, 0);
-      drawLine(s, 15, 3 + bob, 10, 2 + bob, blade, 1, 3, 0.95);
-    } else if (weapon.kind === 'greatsword') {
-      fillRect(s, 11, 14 + bob, 3, 1, trim, 1, 0.35);
-      drawLine(s, 12, 14 + bob, 17, 19 + bob, blade, 2, 3, 0.92);
-    } else {
-      fillRect(s, 11, 14 + bob, 3, 1, trim, 1, 0.35);
-      drawLine(s, 12, 14 + bob, 17, 18 + bob, blade, 1, 3, 0.92);
-    }
-  }
-
-  return s;
-}
 
 export function buildCreatureSprite(kind: string, pose: 'idle' | 'walk' | 'attack', frame: number): PixelSprite {
   const bob = frame % 2 === 1 ? 1 : 0;
@@ -676,16 +573,4 @@ export function buildPropSprite(kind: string, variant = 0, animFrame = 0): Pixel
     default:
       return null;
   }
-}
-
-export function buildPlayerPortraitAscii(armor: ArmorDef): string {
-  const accent = armor.id === 'cinder_mantle' ? '*' : armor.id === 'sentinel_mail' ? '+' : 'o';
-  return [
-    `  _${accent}_  `,
-    ' /###\\ ',
-    ' |=#=| ',
-    '/|###|\\',
-    ' |###| ',
-    ' /| |\\ ',
-  ].join('\n');
 }

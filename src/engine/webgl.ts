@@ -1,4 +1,4 @@
-import { createGlyphAtlas, drawFineStroke, FINE_STROKE, GRASS_TUFT, materialFallback, type GlyphAtlas } from './atlas.ts';
+import { createGlyphAtlas, SHADED_TILE, drawShadedTile, drawFineStroke, FINE_STROKE, GRASS_TUFT, materialFallback, type GlyphAtlas } from './atlas.ts';
 
 const VS_QUAD = `#version 300 es
 precision highp float;
@@ -458,7 +458,9 @@ export class WebGLAsciiRenderer {
           ctx.fillStyle = `rgb(${p.fg[o]},${p.fg[o + 1]},${p.fg[o + 2]})`;
           const glyph = this.atlas.glyphs[gid];
           const code = glyph.charCodeAt(0);
-          if (code >= FINE_STROKE) {
+          if (code >= SHADED_TILE) {
+            drawShadedTile(ctx, code - SHADED_TILE, px, py, cw, ch);
+          } else if (code >= FINE_STROKE) {
             ctx.strokeStyle = ctx.fillStyle;
             drawFineStroke(ctx, code, px, py, cw, ch);
           } else {
