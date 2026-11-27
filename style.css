@@ -1,0 +1,146 @@
+:root {
+  --bg: #040406;
+  --fg: #d6ccb6;
+  --dim: #7d7466;
+  --blood: #c0322a;
+  --ember: #f0a04a;
+  --gold: #e8c27a;
+  --panel: rgba(8, 7, 9, 0.86);
+  --line: rgba(214, 204, 182, 0.18);
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "IBM Plex Mono", Consolas, "Courier New", monospace;
+  cursor: crosshair;
+  user-select: none;
+}
+
+#screen, #bloom { position: fixed; left: 0; top: 0; }
+#bloom {
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter: blur(7px) brightness(1.5) contrast(1.7);
+  opacity: 0.6;
+}
+#vignette {
+  position: fixed; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.78) 100%),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.13) 0 1px, transparent 1px 3px);
+}
+#hurt {
+  position: fixed; inset: 0; pointer-events: none; opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 35%, rgba(140, 0, 0, 0.55) 100%);
+}
+
+.hidden { display: none !important; }
+.dim { color: var(--dim); }
+.hint { color: var(--dim); font-size: 12px; margin-top: 14px; letter-spacing: 0.08em; }
+
+/* HUD */
+#hud { position: fixed; inset: 0; pointer-events: none; font-size: 13px; text-shadow: 0 0 6px #000, 0 0 2px #000; }
+#stats { position: absolute; left: 18px; top: 16px; line-height: 1.5; }
+#stats > div { white-space: pre; }
+#hp { color: #c9463c; }
+#st { color: #8fae6a; }
+#flasks { color: var(--ember); margin-top: 4px; }
+#right { position: absolute; right: 18px; bottom: 16px; text-align: right; line-height: 1.5; }
+#embers { color: var(--ember); font-size: 22px; font-weight: 600; }
+#sigils { color: var(--gold); letter-spacing: 0.05em; }
+#boss { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); text-align: center; }
+#boss > div { white-space: pre; }
+#bossName { color: var(--fg); letter-spacing: 0.15em; font-size: 13px; margin-bottom: 2px; }
+#bossBar { color: var(--blood); font-size: 12px; }
+#prompt {
+  position: absolute; left: 50%; bottom: 13%; transform: translateX(-50%);
+  padding: 6px 14px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); letter-spacing: 0.05em;
+}
+
+/* Banner */
+#banner {
+  position: fixed; left: 0; right: 0; top: 34%; text-align: center; pointer-events: none;
+  opacity: 0; transition: opacity 1.2s ease; text-shadow: 0 0 18px #000, 0 0 4px #000;
+}
+#banner.show { opacity: 1; transition: opacity 0.6s ease; }
+#bTitle { font-family: "UnifrakturMaguntia", serif; font-size: clamp(30px, 5vw, 56px); color: var(--fg); letter-spacing: 0.04em; }
+#bSub { margin-top: 6px; color: var(--dim); font-size: 14px; letter-spacing: 0.12em; }
+#banner.gold #bTitle { color: var(--gold); }
+#banner.blood #bTitle { color: var(--blood); font-size: clamp(24px, 3.4vw, 40px); }
+#banner.pale #bTitle { font-size: clamp(26px, 3.8vw, 44px); color: #cfc8ba; }
+#banner.title #bTitle { color: var(--ember); font-size: clamp(40px, 7vw, 84px); }
+
+/* Dialog + menus */
+#dialog, #menu {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--line); box-shadow: 0 0 60px #000;
+  padding: 18px 24px; width: min(640px, calc(100vw - 32px)); box-sizing: border-box;
+}
+#dialog { bottom: 8%; }
+#dTitle, #mTitle { color: var(--gold); letter-spacing: 0.12em; font-size: 13px; text-transform: uppercase; margin-bottom: 10px; }
+#dText { font-size: 15px; line-height: 1.6; }
+#menu { top: 50%; transform: translate(-50%, -50%); }
+#mInfo { color: var(--dim); font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
+#mItems { display: flex; flex-direction: column; gap: 2px; }
+.item, #tMenu button {
+  font: inherit; color: var(--fg); background: transparent; border: 1px solid transparent;
+  text-align: left; padding: 7px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 16px;
+}
+.item .sub { color: var(--dim); font-size: 12px; }
+.item.sel { border-color: var(--line); background: rgba(240, 160, 74, 0.08); }
+.item.sel .lab::before { content: '» '; color: var(--ember); }
+.item.disabled { opacity: 0.35; cursor: default; }
+
+/* Death */
+#death {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(30, 0, 0, 0.35), rgba(0, 0, 0, 0.85));
+  font-family: "UnifrakturMaguntia", serif; color: var(--blood); font-size: clamp(32px, 6vw, 72px);
+  text-shadow: 0 0 30px #300;
+}
+#death.fade { animation: death 4.2s ease forwards; }
+@keyframes death { 0% { opacity: 0; } 25% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Map */
+#mapWrap {
+  position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(2, 2, 4, 0.9);
+}
+#map { border: 1px solid var(--line); box-shadow: 0 0 60px #000; }
+
+/* Help */
+#help {
+  position: fixed; right: 18px; top: 16px; background: var(--panel); border: 1px solid var(--line);
+  padding: 12px 16px; font-size: 12px; line-height: 1.7; color: var(--dim); pointer-events: none;
+}
+#help b { color: var(--fg); font-weight: 600; }
+#help .h { color: var(--gold); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
+
+/* Title */
+#title {
+  position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.7));
+  text-shadow: 0 0 24px #000;
+}
+#title .logo {
+  font-family: "UnifrakturMaguntia", serif; font-size: clamp(56px, 12vw, 150px); color: var(--ember);
+  text-shadow: 0 0 40px rgba(240, 120, 40, 0.45), 0 0 8px #000;
+  animation: flicker 4s infinite;
+}
+#title .tag { color: var(--dim); letter-spacing: 0.4em; text-transform: uppercase; font-size: 13px; margin-top: 4px; }
+#tMenu { margin-top: 36px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+#tMenu button { justify-content: center; min-width: 220px; border-color: var(--line); background: rgba(8, 7, 9, 0.6); letter-spacing: 0.15em; text-transform: uppercase; }
+#tMenu button:hover { border-color: var(--ember); color: var(--ember); }
+@keyframes flicker {
+  0%, 100% { opacity: 1; } 47% { opacity: 1; } 48% { opacity: 0.82; } 50% { opacity: 1; } 72% { opacity: 0.92; } 73% { opacity: 1; }
+}
+
+@media (max-width: 600px) {
+  #hud { font-size: 11px; }
+  #stats { left: 16px; }
+  #right { right: 16px; }
+}
