@@ -1,3 +1,4 @@
+import { GRASS_TUFT, STONE_FACE, WATER_LINE } from '../engine/atlas.ts';
 import { TextOverlay, type OverlayArrow, type OverlayBar, type OverlayLabel } from '../engine/textOverlay.ts';
 import { ASP, clamp, hash, lerp, noise, TAU } from '../engine/util.ts';
 import { WebGLAsciiRenderer } from '../engine/webgl.ts';
@@ -454,7 +455,7 @@ export class SceneRenderer {
           g *= darkK * (0.88 + ripple * 0.25);
           b *= darkK * (0.98 + ripple * 0.28);
           if (ripple > 0.35 && hv > 0.45) {
-            code = ripple > 0.65 ? 126 : 45; // ~ -
+            code = WATER_LINE + Math.floor(hv * 4);
           } else {
             code = hv > 0.78 ? 46 : 32; // sparse delicate dots over obsidian void
           }
@@ -464,7 +465,9 @@ export class SceneRenderer {
             r = 0.56;
             g = 0.66;
             b = 0.74;
-            code = ripple > 0 ? 126 : 45;
+            code = WATER_LINE + Math.floor(detail * 3.99);
+            const foam = 0.45 + detail * 0.45 + ripple * 0.16;
+            r *= foam; g *= foam; b *= foam;
           }
         } else if (tp === T.ROAD || tp === T.FLOOR || tp === T.ARCH) {
           // Intricate weathered cobblestone / flagstone mapped through full 58-char stone ramp!
@@ -582,10 +585,10 @@ export class SceneRenderer {
             if (od < 15) occAlpha = 0.24;
           }
 
-          const brickRow = Math.floor(fh / 2);
+          const brickRow = Math.floor(fh / 3);
           const stagger = (brickRow & 1) * 4;
           const isMortarV = ((cellX + stagger) % 7 + 7) % 7 === 0;
-          const isMortarH = (fh % 2) === 0;
+          const isMortarH = (fh % 3) === 0;
           const topCap = fh >= topH - 1;
           const isArchRim = isArch && fh === (subX === 0 || subX === WORLD_SCALE_X - 1 ? 10 : 12);
 
@@ -623,7 +626,13 @@ export class SceneRenderer {
               g = 0.56;
               b = 0.24;
             }
-            ch = pickRampChar(RAMP_STONE, lum, (crackN - 0.5) * 0.16);
+            const grain = hash(cellX, cellY - fh, 103);
+            if ((isMortarV || isMortarH) && !topCap && !isArchRim) {
+              ch = isMortarV ? 58 : grain > 0.65 ? 45 : 46;
+            } else {
+              const band = clamp(Math.floor(lum * 4 + grain * 0.45), 0, 3);
+              ch = STONE_FACE + band * 4 + Math.floor(grain * 4);
+            }
           }
 
           this.putCell(x, fy, ch, r, g, b, 0, occAlpha, 0.09);
@@ -641,10 +650,10 @@ export class SceneRenderer {
     for (const rp of remotePlayers) grassEntities.push({ x: rp.x, y: rp.y });
 
     const grassStep = G.options.grassDensity >= 0.9 ? 1 : 2;
-    for (let y = 3; y < rows; y += grassStep) {
+    for (let y = ((-this.camCellY % grassStep) + grassStep) % grassStep; y < rows; y += grassStep) {
       const cellY = this.camCellY + y;
       const wy = cellY / WORLD_SCALE_Y;
-      for (let x = 0; x < cols; x += grassStep) {
+      for (let x = ((-this.camCellX % grassStep) + grassStep) % grassStep; x < cols; x += grassStep) {
         const i = y * cols + x;
         if (!(this.FL[i] & 16)) continue;
         if (this.FL[i] & 4) continue;
@@ -659,7 +668,7 @@ export class SceneRenderer {
           (noise(wx * 0.075 - t * (0.65 + G.weather.wind * 1.4), wy * 0.11 + t * 0.12, 5) - 0.48) * 1.75 +
           Math.sin(t * 1.8 + wx * 0.35 + wy * 0.2) * 0.25;
         const disp = G.grassField.sampleDisplacement(wx, wy, grassEntities);
-        const tilt = wind + disp;
+        const tilt = wind + disp + (hv - 0.44) * 0.85;
 
         // Sweeping hill tonal variation + moonlight sheen
         const hill = noise(wx * 0.06, wy * 0.08, 29);
@@ -679,15 +688,9 @@ export class SceneRenderer {
           const bi = by * cols + bx;
           if (this.FL[bi] & 4) continue;
 
-          // Choose expressive blade stroke based on tilt & height
-          let ch: number;
-          if (b === len - 1 && Math.abs(tilt) < 0.25) ch = hv > 0.45 ? 39 : 44; // delicate tip ' ,
-          else if (tilt < -0.32) ch = 92; // \
-          else if (tilt > 0.32) ch = 47; // /
-          else ch = 124; // |
-
-          // Base blades darker, tips catch bright emerald/sage moonlight
-          const tipK = 0.55 + (b / Math.max(1, len - 1)) * 0.68;
+          const lean = tilt < -0.28 ? 0 : tilt > 0.28 ? 2 : 1;
+          const ch = GRASS_TUFT + lean * 4 + (Math.floor(hv * 23) & 3);
+          const tipK = (0.48 + b / (len - 1) * 0.76) * (0.74 + patch * 0.48 + hv * 0.24);
           this.CHR[bi] = ch;
           this.BR[bi] = rBase * tipK;
           this.BG[bi] = gBase * tipK;
@@ -843,7 +846,7 @@ export class SceneRenderer {
         if (!(this.FL[i] & 1) || (this.FL[i] & (2 | 4 | 8))) continue;
 
         // Horizontal sinusoidal water ripple shear
-        const wave = Math.sin(t * 2.1 + y * 0.42 + x * 0.05);
+        const wave = Math.sin(t * 2.1 + (y + this.camCellY) * 0.42 + (x + this.camCellX) * 0.05);
         const waveShift = Math.round(wave * 1.35);
 
         // Mirror walls, towers, trees, torches & characters standing above the water up to 28 cells!
@@ -860,13 +863,13 @@ export class SceneRenderer {
               if (this.FL[mi] & (2 | 4 | 8)) {
                 const fade = (1 - distY / 30) * 0.62;
                 // Break reflection slightly along horizontal scanline troughs
-                const scan = 0.72 + 0.28 * Math.sin(y * 1.4 + t * 2.4);
+                const scan = 0.72 + 0.28 * Math.sin((y + this.camCellY) * 1.4 + t * 2.4);
                 const k = fade * scan;
                 this.BR[i] = this.BR[i] * 0.35 + this.BR[mi] * k * 0.82;
                 this.BG[i] = this.BG[i] * 0.35 + this.BG[mi] * k * 0.92;
                 this.BB[i] = this.BB[i] * 0.35 + this.BB[mi] * k * 1.12;
                 this.EM[i] = this.EM[mi] * k * 0.75;
-                this.CHR[i] = this.CHR[mi] > 32 ? this.CHR[mi] : 126;
+                this.CHR[i] = scan > 0.66 && this.CHR[mi] > 32 ? this.CHR[mi] : WATER_LINE + (sx & 3);
                 reflected = true;
               }
             }
@@ -887,7 +890,7 @@ export class SceneRenderer {
               this.BG[i] = lerp(this.BG[i], 0.9 * mLum, 0.9);
               this.BB[i] = lerp(this.BB[i], 0.98 * mLum, 0.92);
               this.EM[i] = Math.max(this.EM[i], mLum * 0.85);
-              this.CHR[i] = pickRampChar(RAMP_STONE, clamp(mLum * 0.92, 0.05, 0.96), 0);
+              this.CHR[i] = WATER_LINE + Math.floor(this.HV[i] * 4);
             }
           }
         }

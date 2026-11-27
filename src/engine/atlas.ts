@@ -13,10 +13,55 @@ export interface GlyphAtlas {
   index: Int16Array;
 }
 
+// Composite glyphs share the regular atlas and its one-byte cell indices.
+export const GRASS_TUFT = 0xe000; // three lean directions, four silhouettes each
+export const STONE_FACE = GRASS_TUFT + 12; // four lightness bands, four faces each
+export const WATER_LINE = STONE_FACE + 16; // four broken bands
+const MATERIAL_END = WATER_LINE + 4;
+
+export function materialFallback(code: number): string {
+  if (code < STONE_FACE) return ['\\', '|', '/'][Math.floor((code - GRASS_TUFT) / 4)];
+  if (code < WATER_LINE) return ':oxQ'[Math.floor((code - STONE_FACE) / 4)];
+  return '-_=~'[code - WATER_LINE];
+}
+
+function drawMaterial(ctx: CanvasRenderingContext2D, code: number, w: number, h: number): void {
+  const variant = code & 3;
+  if (code < STONE_FACE) {
+    const lean = Math.floor((code - GRASS_TUFT) / 4) - 1;
+    for (let n = 0; n < 3; n++) {
+      const root = w * (0.18 + n * 0.29);
+      const tip = root + w * (lean * 0.24 + (n - 1) * 0.13);
+      const height = h * (0.46 + ((variant + n * 3) % 5) * 0.12);
+      ctx.globalAlpha = n === 1 ? 0.96 : 0.36 + n * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(root - w * 0.08, h);
+      ctx.quadraticCurveTo(root, h * 0.58, tip, h - height);
+      ctx.quadraticCurveTo(root + w * 0.1, h * 0.7, root + w * 0.09, h);
+      ctx.fill();
+    }
+  } else if (code < WATER_LINE) {
+    const band = Math.floor((code - STONE_FACE) / 4);
+    const letters = ['.,:;', 'crsn', 'qpdb', 'Q08B'][band];
+    ctx.font = `600 ${Math.round(h * 0.84)}px ${FONT_FAMILY}`;
+    ctx.fillText(letters[variant], w * 0.35, h * 0.46, w * 0.65);
+    ctx.globalAlpha = 0.62;
+    ctx.font = `500 ${Math.round(h * 0.55)}px ${FONT_FAMILY}`;
+    ctx.fillText(letters[(variant + 1) % 4], w * 0.82, h * 0.56, w * 0.38);
+    ctx.globalAlpha = 0.28;
+    ctx.fillRect(w * 0.08, h * 0.12, w * (0.36 + variant * 0.1), h * 0.08);
+  } else {
+    ctx.fillRect(w * (variant % 2) * 0.16, h * 0.42, w * (0.56 + variant * 0.12), h * 0.12);
+    ctx.globalAlpha = 0.36;
+    ctx.fillRect(w * 0.39, h * 0.72, w * 0.58, h * 0.08);
+  }
+}
+
 export function buildGlyphString(): string {
   let s = ' '; // index 0 = empty space
   for (let c = 33; c < 127; c++) s += String.fromCharCode(c);
   s += '·≈░▒▓█•◆◇▲✠✦»«°';
+  for (let code = GRASS_TUFT; code < MATERIAL_END; code++) s += String.fromCharCode(code);
   return s;
 }
 
@@ -57,7 +102,15 @@ export function createGlyphAtlas(fontPx: number, dpr: number): GlyphAtlas {
     const ch = GLYPH_CHARS[k];
     const gx = k % cols;
     const gy = (k / cols) | 0;
-    if (k > 0) {
+    if (ch.charCodeAt(0) >= GRASS_TUFT) {
+      ctx.save();
+      ctx.translate(gx * texCellW, gy * texCellH);
+      ctx.beginPath();
+      ctx.rect(0, 0, texCellW, texCellH);
+      ctx.clip();
+      drawMaterial(ctx, ch.charCodeAt(0), texCellW, texCellH);
+      ctx.restore();
+    } else if (k > 0) {
       ctx.fillText(ch, gx * texCellW + texCellW * 0.5, gy * texCellH + texCellH * 0.53);
     }
     index[ch.charCodeAt(0)] = k;
