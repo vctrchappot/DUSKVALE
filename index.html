@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Duskvale</title>
+  <meta name="description" content="Duskvale – ein ASCII-Dark-Fantasy-Open-World-Spiel im Browser.">
+  <link rel="icon" href="assets/icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=UnifrakturMaguntia&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="screen"></canvas>
+  <canvas id="bloom"></canvas>
+  <div id="vignette"></div>
+  <div id="hurt"></div>
+
+  <div id="hud" class="hidden">
+    <div id="stats">
+      <div id="hp"></div>
+      <div id="st"></div>
+      <div id="flasks"></div>
+    </div>
+    <div id="right">
+      <div><span class="dim">Glut</span> <span id="embers">0</span></div>
+      <div id="lvl" class="dim"></div>
+      <div id="sigils"></div>
+      <div id="weather" class="dim"></div>
+    </div>
+    <div id="boss" class="hidden">
+      <div id="bossName"></div>
+      <div id="bossBar"></div>
+    </div>
+    <div id="prompt" class="hidden"></div>
+  </div>
+
+  <div id="banner"><div id="bTitle"></div><div id="bSub"></div></div>
+
+  <div id="dialog" class="hidden">
+    <div id="dTitle"></div>
+    <div id="dText"></div>
+    <div class="hint">[E] weiter</div>
+  </div>
+
+  <div id="menu" class="hidden">
+    <div id="mTitle"></div>
+    <div id="mInfo"></div>
+    <div id="mItems"></div>
+    <div class="hint">W/S wählen · E bestätigen · Esc zurück</div>
+  </div>
+
+  <div id="death" class="hidden"><div>DIE DUNKELHEIT HOLT DICH</div></div>
+
+  <div id="mapWrap" class="hidden">
+    <canvas id="map"></canvas>
+    <div class="hint">M schließen · ▲ Schreine · ✠ Orte · * verlorene Glut</div>
+  </div>
+
+  <div id="help" class="hidden">
+    <div class="h">Steuerung</div>
+    <div><b>WASD / Pfeile</b> bewegen</div>
+    <div><b>Maus</b> zielen</div>
+    <div><b>Linksklick / J</b> Schwerthieb</div>
+    <div><b>Leertaste / Shift / Rechtsklick</b> Ausweichrolle</div>
+    <div><b>Q</b> Glutflakon trinken</div>
+    <div><b>E</b> interagieren · rasten · lesen</div>
+    <div><b>M</b> Karte &nbsp; <b>H</b> Hilfe &nbsp; <b>+/−</b> Zoom &nbsp; <b>Esc</b> Pause</div>
+  </div>
+
+  <div id="title">
+    <div class="logo">Duskvale</div>
+    <div class="tag">eine ASCII-Dark-Fantasy</div>
+    <div id="tMenu"></div>
+    <div class="hint">Enter zum Beginnen</div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
