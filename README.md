@@ -1,39 +1,46 @@
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# Duskvale
+# Duskvale (Stage 2)
 
-Ein ASCII-Dark-Fantasy-Open-World-Spiel, das direkt im Browser läuft. Die ganze Welt wird Zeichen für Zeichen gerendert, mit dynamischem Licht, Regen, Nebel, Gewittern, Wasserspiegelungen, Glühwürmchen und Blut auf dem Boden.
+Ein hochauflösendes ASCII-Dark-Fantasy-Action-RPG im Browser. Die gesamte Welt wird über eine WebGL2-ASCII-Pipeline Zeichen für Zeichen mit dynamischer Beleuchtung, GPU-Bloom, 2.5D-Fassaden, reaktivem Halm-Gras, Wasserspiegelungen und unbeleuchtetem UI-Text-Overlay gerendert.
 
-## Spielen
+## Entwicklung & Start
 
-`index.html` im Browser öffnen. Es gibt keinen Build-Schritt und keine Abhängigkeiten; nur die Schriften kommen von Google Fonts, mit lokalem Fallback.
+```bash
+npm install
+npm run dev
+```
+
+Build & Tests:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+Dev-Shortcut: `/#play` startet sofort, `/#play:64,-32` startet direkt an der **Burg am See**, `/#play:-175,-28` am **Hügelgrab des Heiligen Vael**.
+
+## Steuerung
 
 | Taste | Aktion |
 | --- | --- |
-| WASD / Pfeile | bewegen |
+| WASD / Pfeile | bewegen (weiche Beschleunigung) |
 | Maus | zielen |
-| Linksklick / J | Schwerthieb |
+| Linksklick | 3-Hit-Schwertkombo |
+| F | Parieren (Zeitfenster bricht gegnerische Haltung) |
 | Leertaste / Shift / Rechtsklick | Ausweichrolle (Unverwundbarkeit) |
-| Q | Glutflakon trinken |
-| E | interagieren, rasten, lesen |
-| M | Karte · H Hilfe · +/− Zoom · Esc Pause |
+| Tab / Mittlere Maustaste | Lock-on anvisieren |
+| 1–4 | Glut-Fähigkeiten (Flammenhieb, Glutbolzen, Ascheschild, Sprungangriff) |
+| Q / 5 | Glutflakon trinken |
+| E | interagieren, rasten, lesen, handeln |
+| I / J / M | Inventar · Journal · Karte 2.0 (Zoom/Pan/Pins) |
+| +/− · F3 · H · Esc | Zoom (Nah/Mittel/Fern) · Debug-Overlay · Hilfe · Pause & Optionen |
 
-## Die Welt
+## Architektur (Stage 2)
 
-Die Welt ist prozedural und unendlich, mit festem Seed. Die alten Straßen führen von der **Glutsenke** zu vier handgebauten Orten:
-
-- **Hügelgrab des Heiligen Vael** (Westen): Vael, der Gebeinkönig. Siegel des Knochens
-- **Die Ertrunkene Kapelle** (Osten, Moor): Die Ertrunkene Mutter. Siegel der Flut
-- **Aschenfeste** (Süden): Corvus, der Aschenritter. Siegel der Asche
-- **Die Schwarze Kathedrale** (Norden): Sie öffnet sich erst mit drei Siegeln.
-
-Dazwischen liegen zufällige Ruinen, Wachtürme, Friedhöfe, Steinkreise, Lager und Wegschreine. Schreine sind Rast- und Respawnpunkte; wer dort rastet, kann aufleveln, schnellreisen und speichern. Dabei erheben sich die Feinde wieder. Wer stirbt, verliert seine Glut am Todesort und kann sie dort wieder einsammeln.
-
-## Technik
-
-- `js/world.js`: Terrain aus fbm-Noise, Biome, Straßen, Blueprints, 32×32-Chunks
-- `js/render.js`: Zellpuffer, Beleuchtung, Nebel, Reflexionen; Glyph-Atlas mit `source-in`-Kolorierung und CSS-Bloom
-- `js/game.js`: Spieler, Gegner-KI, Bosse mit Phasen, Wetter, Tag/Nacht, Speichern über `localStorage`
-- `js/sprites.js`: ASCII-Art und Dichte-Sprites · `js/audio.js` prozeduraler WebAudio-Sound · `js/ui.js` HUD, Menüs, Karte
-
-Dev-Shortcut: `index.html#play` startet sofort, `index.html#play:-180,-30` startet an einer Weltposition.
+- `src/engine/`: WebGL2-Fullscreen-Quad-Renderer (`webgl.ts`), 2×-Oversampling-Atlas (`atlas.ts`), unbeleuchtetes Text-Overlay (`textOverlay.ts`), Optionen/Barrierefreiheit (`options.ts`), WebAudio (`audio.ts`)
+- `src/world/`: Prozedurale 2.5D-Welt mit Höhenstufen 0–4, Klippen, Treppen, Torbögen, Wachtürmen, Burg am See, Wegweisern (`world.ts`, `blueprints.ts`) und Halm-Gras/Wasser-System (`grass.ts`)
+- `src/game/`: Fixe 60-Hz-Simulation, glatte Feder-Kamera mit Sub-Zellen-Scrolling (`camera.ts`), Pixel-Art-zu-ASCII-Sprites (`pixelSprites.ts`), Quests & Onboarding (`quests.ts`), Waffen/Rüstungen/Ringe/Skills (`rpg.ts`), Kampf & KI (`game.ts`)
+- `src/render/`: Bild→ASCII-Pipeline mit Material- & Sobel-Kanten-Glyphs, 2.5D-Fassaden-Verdeckung, Wasserspiegelung und Schatten (`renderer.ts`)
+- `src/ui/`: HUD (ASCII-Porträt, Kompass, Quest-Tracker, XP-Leiste, Hotbar 1–0), Karte 2.0, Journal, Inventar, Optionen & Multi-Slot-Speicher (`ui.ts`)
