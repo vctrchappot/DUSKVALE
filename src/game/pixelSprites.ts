@@ -135,10 +135,10 @@ function fillFoliageCluster(
         const r = colDark[0] + (colHi[0] - colDark[0]) * lit;
         const g = colDark[1] + (colHi[1] - colDark[1]) * lit;
         const b = colDark[2] + (colHi[2] - colDark[2]) * lit;
-        // Occasional glowing pale-cyan dew/pollen speck inside canopy (like Image 1)
-        const dew = hash(x, y, seed + 53) > 0.978;
+        // Rare moonlit needle tips on the lit side; kept as foliage so they don't read as glowing dots.
+        const dew = lit > 0.6 && hash(x, y, seed + 53) > 0.985;
         if (dew) {
-          setPx(s, x, y, [0.78, 0.94, 1.0], 1.1, 3, 0.85);
+          setPx(s, x, y, [0.5, 0.68, 0.66], 1.0, 4, 0.2);
         } else {
           setPx(s, x, y, [r, g, b], 0.85 + lit * 0.35, 4, 0);
         }
@@ -389,8 +389,8 @@ export function buildPropSprite(kind: string, variant = 0, animFrame = 0): Pixel
       const cx = w >> 1;
       const s = makeSprite(w, h, cx, h - 1);
       const bark: [number, number, number] = [0.58, 0.56, 0.52];
-      const darkMoss: [number, number, number] = [0.09, 0.27, 0.12];
-      const hiMoss: [number, number, number] = [0.26, 0.62, 0.26];
+      const darkMoss: [number, number, number] = [0.07, 0.17, 0.14];
+      const hiMoss: [number, number, number] = [0.25, 0.43, 0.34];
 
       // Tall slender weathered bark trunk (just like Image 1!)
       const trunkW = variant === 2 ? 5 : 4;
@@ -400,14 +400,20 @@ export function buildPropSprite(kind: string, variant = 0, animFrame = 0): Pixel
       drawLine(s, cx - 2, h - 3, cx - 5, h - 1, bark, 1, 5, 0);
       drawLine(s, cx + 2, h - 3, cx + 5, h - 1, bark, 1, 5, 0);
 
-      // Small mossy foliage tufts clinging halfway down trunk (exact Image 1 detail!)
-      fillFoliageCluster(s, cx - 3, Math.round(h * 0.62), 4, 2.5, darkMoss, hiMoss, variant * 31 + 3);
-      fillFoliageCluster(s, cx + 3, Math.round(h * 0.52), 4.5, 2.8, darkMoss, hiMoss, variant * 31 + 9);
-
-      // Lush feathery overhanging canopy crown
-      fillFoliageCluster(s, cx, Math.round(h * 0.34), w * 0.45, h * 0.15, darkMoss, hiMoss, variant * 31 + 11);
-      fillFoliageCluster(s, cx - 2, Math.round(h * 0.22), w * 0.38, h * 0.13, darkMoss, hiMoss, variant * 31 + 17);
-      fillFoliageCluster(s, cx + 2, Math.round(h * 0.14), w * 0.28, h * 0.11, darkMoss, hiMoss, variant * 31 + 23);
+      // Build boughs from the bottom up. Their overlapping tips leave pockets
+      // of sky around the trunk and a narrow crown above the widest branches.
+      for (let tier = 0; tier < 6; tier++) {
+        const breadth = w * (0.42 - tier * 0.063);
+        const y = h * (0.56 - tier * 0.092);
+        for (const side of [-1, 1]) {
+          const seed = 39 + variant * 71 + tier * 7 + side;
+          const reach = breadth * (0.72 + hash(tier, side, seed) * 0.28);
+          const drop = reach * (0.23 + hash(side, tier, seed) * 0.18);
+          drawLine(s, cx, y - 1, cx + side * reach, y + drop, bark, 1, 5, 0);
+          fillFoliageCluster(s, cx + side * reach * 0.54, y + drop * 0.57,
+            reach * 0.58, 1.2 + breadth * 0.17, darkMoss, hiMoss, seed);
+        }
+      }
       return s;
     }
 

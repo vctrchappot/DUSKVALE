@@ -5,6 +5,8 @@ const WIDTH = 128;
 const HEIGHT = 111;
 const FOOT_X = 48;
 const FOOT_Y = 93;
+// The painted model is portrait-sized; in the world it stands at roughly 40% of a pine.
+const WORLD_MODEL_SCALE = 0.6;
 
 export function knightAnimationFrame(pose: AnimPose, time: number, walkTime: number, attackLeft: number, attackDuration: number, rollLeft: number): number {
   if (pose === 'walk') return Math.floor(walkTime * 9) % 6;
@@ -68,7 +70,7 @@ function encodeFrame(pixels: Uint8ClampedArray): PixelSprite {
   return s;
 }
 
-function paintKnight(armor: ArmorDef, weapon: WeaponDef, pose: AnimPose, frame: number, scale = 1): HTMLCanvasElement {
+function paintKnight(armor: ArmorDef, weapon: WeaponDef, pose: AnimPose, frame: number, scale = 1, modelScale = 1): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = WIDTH * scale;
   canvas.height = HEIGHT * scale;
@@ -105,6 +107,7 @@ function paintKnight(armor: ArmorDef, weapon: WeaponDef, pose: AnimPose, frame: 
   const attack = pose.startsWith('attack');
   const progress = attack || pose === 'roll' ? Math.min(1, frame / 5) : 0;
   c.translate(FOOT_X, FOOT_Y);
+  c.scale(modelScale, modelScale);
   c.lineJoin = 'round';
   c.lineCap = 'round';
   if (pose === 'roll') {
@@ -225,7 +228,7 @@ function paintKnight(armor: ArmorDef, weapon: WeaponDef, pose: AnimPose, frame: 
 }
 
 export function buildKnightSprite(armor: ArmorDef, weapon: WeaponDef, pose: AnimPose, frame: number): PixelSprite {
-  const c = paintKnight(armor, weapon, pose, frame).getContext('2d')!;
+  const c = paintKnight(armor, weapon, pose, frame, 1, WORLD_MODEL_SCALE).getContext('2d')!;
   return encodeFrame(c.getImageData(0, 0, WIDTH, HEIGHT).data);
 }
 

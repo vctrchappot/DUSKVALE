@@ -59,6 +59,13 @@ interface TerrainStyle {
   organic?: boolean;
 }
 
+const FLOWER_COLORS: [number, number, number][] = [
+  [0.96, 0.96, 0.9], // pale white
+  [0.72, 0.94, 1.0], // moon cyan
+  [0.82, 0.74, 1.0], // dusk violet
+  [1.0, 0.88, 0.55], // ember yellow
+];
+
 const TS: Record<number, TerrainStyle> = {
   [T.DEEP]: { c: [0.16, 0.24, 0.36], bgK: 0.04, water: true, organic: true },
   [T.WATER]: { c: [0.22, 0.32, 0.44], bgK: 0.05, water: true, organic: true },
@@ -93,6 +100,9 @@ export class SceneRenderer {
   private CHR!: Int32Array;
   private MAT!: Uint8Array;
   private ELEV!: Uint8Array;
+  private SHS!: Uint32Array; // per-sprite stamp so a cast shadow darkens each cell once
+  private shadowStamp = 0;
+  private castShadows = true;
   private FL!: Uint8Array; // bit 1 = water, bit 2 = prop/entity, bit 4 = facade, bit 8 = entity, bit 16 = grass
   private BR!: Float32Array;
   private BG!: Float32Array;
@@ -139,6 +149,7 @@ export class SceneRenderer {
     this.MAT = new Uint8Array(n);
     this.ELEV = new Uint8Array(n);
     this.FL = new Uint8Array(n);
+    this.SHS = new Uint32Array(n);
     this.BR = new Float32Array(n);
     this.BG = new Float32Array(n);
     this.BB = new Float32Array(n);
@@ -258,6 +269,36 @@ export class SceneRenderer {
       }
     }
 
+    // 1b. Moon-cast shadow: project every sprite cell onto the ground plane, away from
+    // the moon in the upper left, so figures and trees stand on the terrain instead of on it.
+    if (this.castShadows && alpha > 0.5) {
+      const stamp = ++this.shadowStamp;
+      const fade = alpha * (spr.detail ? 0.62 : 0.55);
+      for (let j = 0; j < spr.h; j++) {
+        const hA = spr.ay - j;
+        if (hA < 1) continue;
+        const offX = Math.round(hA * 0.55);
+        const offY = Math.round(hA * 0.16);
+        const k = 1 - fade * (1 - (hA / Math.max(1, spr.ay)) * 0.45);
+        for (let i = 0; i < spr.w; i++) {
+          if (!spr.a[j * spr.w + i]) continue;
+          const dx = flip ? spr.w - 1 - i : i;
+          const gx = sx0 + dx + offX;
+          const gy = cy + offY;
+          if (gx < 0 || gy < 0 || gx >= cols || gy >= rows) continue;
+          const idx = gy * cols + gx;
+          if (this.SHS[idx] === stamp || this.FL[idx] & (4 | 8)) continue;
+          this.SHS[idx] = stamp;
+          this.BR[idx] *= k;
+          this.BG[idx] *= k;
+          this.BB[idx] *= k;
+          this.BGR[idx] *= k;
+          this.BGG[idx] *= k;
+          this.BGB[idx] *= k;
+        }
+      }
+    }
+
     // 2. Render sprite into dense typographic ASCII
     for (let j = 0; j < spr.h; j++) {
       const topWeight = 1 - j / Math.max(1, spr.h - 1);
@@ -331,6 +372,16 @@ export class SceneRenderer {
           em = Math.max(em, 0.22);
         }
 
+        // Volume: occlusion where the form meets the ground, key light from the left.
+        if (!flash) {
+          const hA = spr.ay - j;
+          const side = (dx - (spr.w - 1) * 0.5) / Math.max(1, spr.w * 0.5);
+          const vol = (0.64 + 0.36 * Math.min(1, Math.max(0, hA) / 5)) * (1 - side * 0.16);
+          r *= vol;
+          g *= vol;
+          b *= vol;
+        }
+
         const lum = clamp(r * 0.3 + g * 0.59 + b * 0.11, 0.08, 1);
         const mat = spr.mat[si];
         const micro = (hash(i, j, 47) - 0.5) * 0.09;
@@ -340,8 +391,8 @@ export class SceneRenderer {
         } else if (mat === 3) {
           code = lum > 0.8 ? 64 : lum > 0.55 ? 42 : 43; // @ * +
         } else if (mat === 4) {
-          // Feathery directional foliage blades (/|\'")
-          code = pickRampChar(RAMP_FOLIAGE, lum, micro * 1.4);
+          const lean = dx < spr.ax - 1 ? 0 : dx > spr.ax + 1 ? 2 : 1;
+          code = GRASS_TUFT + lean * 4 + (Math.floor((micro / 0.09 + 0.5) * 4) & 3);
         } else if (mat === 5) {
           code = pickRampChar(RAMP_BARK, lum, micro * 1.2);
         } else if (mat === 2) {
@@ -544,11 +595,14 @@ export class SceneRenderer {
           code = (cellX & 1) ? 72 : 124;
         } else if (st.stone) {
           // Weathered rock & cliffs using full alphanumeric stone density ramp!
-          const rockL = clamp(0.35 + broad * 0.4 + detail * 0.25, 0.12, 0.95);
+          // Long slate planes crossed by a few pale mineral seams.
+          const band = Math.abs(((cellY * 0.19 + cellX * 0.038 + broad * 2.1) % 1 + 1) % 1 - 0.5);
+          const seam = band < 0.055 && detail > 0.36;
+          const rockL = 0.26 + broad * 0.34 + detail * 0.19 + (seam ? 0.20 : 0);
           r *= rockL * 1.1;
           g *= rockL * 1.12;
           b *= rockL * 1.18;
-          code = pickRampChar(RAMP_STONE, rockL, (hv - 0.5) * 0.15);
+          code = seam ? 45 : hv < 0.22 + detail * 0.17 ? 183 : 32;
         } else if (st.grass) {
           // Deep shadowed forest bed beneath lush multi-layer grass blades
           r *= 0.48;
@@ -575,7 +629,7 @@ export class SceneRenderer {
         this.BR[i] = r;
         this.BG[i] = g;
         this.BB[i] = b;
-        const groundFill = st.masonry ? 0.18 : st.bgK;
+        const groundFill = st.grass ? 0.55 : st.masonry ? 0.24 : st.water ? 0.30 : st.stone ? 0.43 : st.bgK;
         this.BGR[i] = r * groundFill;
         this.BGG[i] = g * groundFill;
         this.BGB[i] = b * groundFill;
@@ -616,13 +670,23 @@ export class SceneRenderer {
 
         const isMerlon = (Math.floor(cellX / 4) & 1) === 0;
         const topH = isMerlon ? facadeH + 2 : facadeH;
-        const subX = ((cellX % WORLD_SCALE_X) + WORLD_SCALE_X) % WORLD_SCALE_X;
 
+
+        // Adjacent arch tiles form one vaulted opening. Sample the run once per column.
+        let archClear = 0;
+        let archDepth = 0;
+        if (isArch) {
+          let left = wx, right = wx;
+          while (W.typeAt(left - 1, wy) === T.ARCH) left--;
+          while (W.typeAt(right + 1, wy) === T.ARCH) right++;
+          const halfWidth = (right - left + 1) * WORLD_SCALE_X / 2;
+          const u = (cellX + 0.5 - left * WORLD_SCALE_X) / halfWidth - 1;
+          archDepth = Math.sqrt(Math.max(0, 1 - u * u));
+          archClear = Math.round(6 + 7 * archDepth);
+        }
+        const pierX = ((cellX % 27) + 27) % 27;
         for (let fh = 1; fh <= topH; fh++) {
-          if (isArch) {
-            const archClear = subX === 0 || subX === WORLD_SCALE_X - 1 ? 9 : 11;
-            if (fh <= archClear) continue;
-          }
+          if (isArch && fh <= archClear) continue;
           const fy = y - fh;
           if (fy < 0 || fy >= rows) continue;
 
@@ -637,13 +701,14 @@ export class SceneRenderer {
           const isMortarV = ((cellX + stagger) % 7 + 7) % 7 === 0;
           const isMortarH = (fh % 3) === 0;
           const topCap = fh >= topH - 1;
-          const isArchRim = isArch && fh === (subX === 0 || subX === WORLD_SCALE_X - 1 ? 10 : 12);
+          const isArchRim = isArch && fh <= archClear + 2;
 
           // Rich weathered stone heightfield (multi-octave fBM + mortar grooves + vertical AO)
-          const ao = 0.52 + 0.52 * (fh / topH);
+          const pierLight = isArch ? 0.92 + archDepth * 0.12 : pierX < 3 ? 1.20 : pierX < 5 ? 0.59 : 0.96;
+          const ao = (0.46 + 0.58 * (fh / topH)) * pierLight;
           const weatherN = noise(cellX * 0.12, (cellY - fh) * 0.14, 71);
           const crackN = noise(cellX * 0.32, (cellY - fh) * 0.32, 97);
-          const blockTint = 0.82 + noise(Math.floor((cellX + stagger) / 7) * 0.9, brickRow * 0.9, 53) * 0.34;
+          const blockTint = 0.75 + hash(Math.floor((cellX + stagger) / 7), cellY - brickRow * 3, 53) * 0.46;
           const mortarK = (isMortarV || isMortarH) && !topCap && !isArchRim ? 0.58 : 1.0;
 
           // Creeping organic moss & ivy patches draping over castle walls & towers (exact Image 2 & 4 look!)
@@ -657,7 +722,7 @@ export class SceneRenderer {
           if (isMoss) {
             const ml = clamp(0.45 + (mossField - 0.68) * 2.2, 0.35, 1.0);
             r = lerp(0.12, 0.28, ml) * ao;
-            g = lerp(0.36, 0.66, ml) * ao;
+            g = lerp(0.24, 0.48, ml) * ao;
             b = lerp(0.14, 0.24, ml) * ao;
             ch = pickRampChar(RAMP_FOLIAGE, ml, (crackN - 0.5) * 0.25);
           } else {
@@ -682,7 +747,7 @@ export class SceneRenderer {
             }
           }
 
-          this.putCell(x, fy, ch, r, g, b, 0, occAlpha, 0.09);
+          this.putCell(x, fy, ch, r, g, b, 0, occAlpha, isMoss ? 0.28 : 0.42);
           this.FL[fy * cols + x] |= 4;
         }
       }
@@ -696,17 +761,16 @@ export class SceneRenderer {
     for (const n of G.npcs) grassEntities.push({ x: n.x, y: n.y });
     for (const rp of remotePlayers) grassEntities.push({ x: rp.x, y: rp.y });
 
-    const grassStep = G.options.grassDensity >= 0.9 ? 1 : 2;
-    for (let y = ((-this.camCellY % grassStep) + grassStep) % grassStep; y < rows; y += grassStep) {
+    for (let y = 0; y < rows; y++) {
       const cellY = this.camCellY + y;
       const wy = cellY / WORLD_SCALE_Y;
-      for (let x = ((-this.camCellX % grassStep) + grassStep) % grassStep; x < cols; x += grassStep) {
+      for (let x = 0; x < cols; x++) {
         const i = y * cols + x;
         if (!(this.FL[i] & 16)) continue;
         if (this.FL[i] & 4) continue;
         const hv = this.HV[i];
-        // Dense 88% lush coverage (no patchy holes!)
         if (hv > 0.88) continue;
+        if (G.options.grassDensity < 0.9 && hash(this.camCellX + x, cellY, 151) > 0.34) continue;
 
         const mat = this.MAT[i];
         const cellX = this.camCellX + x;
@@ -721,13 +785,18 @@ export class SceneRenderer {
         const hill = noise(wx * 0.06, wy * 0.08, 29);
         const patch = noise(wx * 0.2, wy * 0.25, 61);
         const tone = clamp(hill * 0.65 + patch * 0.35, 0, 1);
+        // Clumps: dense tussocks separated by darker hollows where the bed shows through.
+        const clump = noise(wx * 0.55 + hv * 0.3, wy * 0.7, 77);
+        if (clump < 0.3 && hv > 0.42) continue;
+        const clumpK = 0.72 + clump * 0.5;
+        const dry = mat !== T.FOREST && hash(cellX, cellY, 171) > 0.9;
 
-        const rBase = mat === T.MOOR ? lerp(0.28, 0.44, tone) : lerp(0.08, 0.24, tone);
-        const gBase = mat === T.MOOR ? lerp(0.32, 0.48, tone) : lerp(0.28, 0.68, tone);
-        const bBase = mat === T.MOOR ? lerp(0.14, 0.22, tone) : lerp(0.1, 0.25, tone);
+        const rBase = mat === T.MOOR ? lerp(0.28, 0.44, tone) : lerp(0.08, 0.30, tone);
+        const gBase = mat === T.MOOR ? lerp(0.32, 0.48, tone) : lerp(0.19, 0.51, tone);
+        const bBase = mat === T.MOOR ? lerp(0.14, 0.22, tone) : lerp(0.14, 0.36, tone);
 
         // Tall 3-4 cell layered feathery blades
-        const len = hv < 0.22 ? 4 : hv < 0.58 ? 3 : 2;
+        const len = 1 + Math.round(patch * 2 + hv) + (clump > 0.68 ? 1 : 0);
         for (let b = 0; b < len; b++) {
           const bx = x + Math.round(tilt * (b * 0.48));
           const by = y - b;
@@ -737,21 +806,32 @@ export class SceneRenderer {
 
           const lean = tilt < -0.28 ? 0 : tilt > 0.28 ? 2 : 1;
           const ch = GRASS_TUFT + lean * 4 + (Math.floor(hv * 23) & 3);
-          const tipK = (0.48 + b / (len - 1) * 0.76) * (0.74 + patch * 0.48 + hv * 0.24);
-          this.CHR[bi] = ch;
-          this.BR[bi] = rBase * tipK;
-          this.BG[bi] = gBase * tipK;
-          this.BB[bi] = bBase * tipK;
+          const tipK = (0.48 + b / Math.max(1, len - 1) * 0.76) * (0.74 + patch * 0.48 + hv * 0.24) * clumpK;
+          const isTip = b === len - 1;
+          this.CHR[bi] = dry && isTip ? 39 : ch;
+          if (dry && isTip) {
+            // Sun-bleached seed heads break up the green with a few straw tips.
+            this.BR[bi] = 0.58 * tipK;
+            this.BG[bi] = 0.54 * tipK;
+            this.BB[bi] = 0.34 * tipK;
+          } else {
+            this.BR[bi] = rBase * tipK;
+            this.BG[bi] = gBase * tipK;
+            this.BB[bi] = bBase * tipK;
+          }
         }
 
         // Delicate scattered glowing white & pale-cyan meadow pollen / wildflower specks (exact Images 1, 2, 3!)
-        if (hv > 0.855 && mat !== T.FOREST) {
-          const cyan = hash(cellX, cellY, 99) > 0.45;
-          this.CHR[i] = hv > 0.87 ? 42 : 183; // * or ·
-          this.BR[i] = cyan ? 0.72 : 0.96;
-          this.BG[i] = cyan ? 0.94 : 0.96;
-          this.BB[i] = cyan ? 1.0 : 0.9;
-          this.EM[i] = 0.65;
+        if (hv > 0.863 && patch > 0.54 && mat !== T.FOREST) {
+          // Each meadow patch blooms in one hue so flowers read as drifts, not confetti.
+          const hue = Math.floor(noise(wx * 0.09, wy * 0.11, 131) * 4) & 3;
+          const fc = FLOWER_COLORS[hue];
+          const bright = 0.7 + hash(cellX, cellY, 99) * 0.3;
+          this.CHR[i] = hv > 0.872 ? 42 : 183; // * or ·
+          this.BR[i] = fc[0] * bright;
+          this.BG[i] = fc[1] * bright;
+          this.BB[i] = fc[2] * bright;
+          this.EM[i] = 0.35 + bright * 0.3;
         }
       }
     }
@@ -765,6 +845,7 @@ export class SceneRenderer {
       this.putCell(gx, gy, d.code, d.r, d.g, d.b, 0, a);
     }
 
+    this.castShadows = G.options.shadows;
     // --------------------------------------------------------- 5. Y-Sorted Unified Drawables (Props, Entities, Remote Players)
     type DrawItem = {
       y: number;
@@ -904,10 +985,10 @@ export class SceneRenderer {
           const sx = clamp(x + waveShift, 0, cols - 1);
           const si = sy * cols + sx;
           if (!(this.FL[si] & 1)) {
-            const mirrorY = sy - distY;
+            const mirrorY = sy - distY + 1;
             if (mirrorY >= 0) {
               const mi = mirrorY * cols + sx;
-              if (this.FL[mi] & (2 | 4 | 8)) {
+              if (this.FL[mi] & (2 | 4 | 8 | 16)) {
                 const fade = (1 - distY / 30) * 0.62;
                 // Break reflection slightly along horizontal scanline troughs
                 const scan = 0.72 + 0.28 * Math.sin((y + this.camCellY) * 1.4 + t * 2.4);
@@ -915,8 +996,13 @@ export class SceneRenderer {
                 this.BR[i] = this.BR[i] * 0.35 + this.BR[mi] * k * 0.82;
                 this.BG[i] = this.BG[i] * 0.35 + this.BG[mi] * k * 0.92;
                 this.BB[i] = this.BB[i] * 0.35 + this.BB[mi] * k * 1.12;
+                // The reflected bank leaves a continuous cool wash between broken wave crests.
+                const wash = k * 0.36;
+                this.BGR[i] += this.BR[mi] * wash * 0.72;
+                this.BGG[i] += this.BG[mi] * wash * 0.88;
+                this.BGB[i] += this.BB[mi] * wash;
                 this.EM[i] = this.EM[mi] * k * 0.75;
-                this.CHR[i] = scan > 0.66 && this.CHR[mi] > 32 ? this.CHR[mi] : WATER_LINE + (sx & 3);
+                this.CHR[i] = scan > 0.58 ? WATER_LINE + (sx & 3) : 46;
                 reflected = true;
               }
             }
@@ -1007,13 +1093,18 @@ export class SceneRenderer {
       this.putCell(gx, gy, 111, q.col[0], q.col[1], q.col[2], 1, 1, 0.08);
     }
     const rc = G.weather.wind > 0.5 ? 47 : 124;
-    for (const d of G.rain) {
+    for (let ri = 0; ri < G.rain.length; ri++) {
+      const d = G.rain[ri];
       const gx = Math.round(d.x * WORLD_SCALE_X) - this.camCellX;
       const gy = Math.round(d.y * WORLD_SCALE_Y) - this.camCellY;
       if (d.ash) {
         this.putCell(gx, gy, d.life % 0.4 < 0.2 ? 46 : 39, 0.65, 0.58, 0.52, 0.35, 0.72, 0.04);
       } else {
-        this.putCell(gx, gy, rc, 0.52, 0.62, 0.78, 0.22, 0.55, 0.04);
+        // Thin two-cell streaks with per-drop brightness so rain reads as depth, not a dot grid.
+        const dv = hash(ri, 0, 211);
+        const a = 0.22 + dv * 0.3;
+        this.putCell(gx, gy, rc, 0.5, 0.6, 0.76, 0.1, a, 0.03);
+        if (dv > 0.45) this.putCell(gx, gy - 1, rc, 0.42, 0.5, 0.64, 0.05, a * 0.45, 0.02);
       }
     }
     for (const f of G.fireflies) {
@@ -1144,7 +1235,7 @@ export class SceneRenderer {
       if (!G.player.dead) {
         labels.push({
           wx: pxInterp,
-          wy: pyInterp - 14.6,
+          wy: pyInterp - 9.6,
           text: `${G.options.playerName}`,
           color: '#f4f2ec',
           bg: 'rgba(3, 5, 8, 0.55)',
@@ -1156,7 +1247,7 @@ export class SceneRenderer {
         if (Math.abs(rp.x - pxInterp) < 34 && Math.abs(rp.y - pyInterp) < 22) {
           labels.push({
             wx: rp.x,
-            wy: rp.y - 14.6,
+            wy: rp.y - 9.6,
             text: `${rp.name}`,
             color: '#9ee2ff',
             bg: 'rgba(3, 5, 8, 0.55)',
@@ -1165,7 +1256,7 @@ export class SceneRenderer {
           if (rp.bubbleText) {
             labels.push({
               wx: rp.x,
-              wy: rp.y - 16.2,
+              wy: rp.y - 11.2,
               text: `»${rp.bubbleText}«`,
               color: '#ffffff',
               bg: 'rgba(8, 12, 20, 0.85)',
