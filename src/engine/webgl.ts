@@ -73,10 +73,16 @@ void main() {
   vec3 col = mix(bg.rgb, fg.rgb, alpha);
   // Emissive boost stored in fg.a
   float em = fg.a * alpha;
-  col += fg.rgb * em * 0.45;
+  col += fg.rgb * em * 0.48;
 
   // ACES filmic tonemap
-  col = acesToneMap(col * 1.18);
+  col = acesToneMap(col * 1.22);
+
+  // Subtle dark-fantasy split-toning: cool indigo shadows, warm parchment highlights
+  float luma = dot(col, vec3(0.299, 0.587, 0.114));
+  vec3 shadowTint = vec3(0.94, 0.97, 1.08);
+  vec3 hiTint = vec3(1.04, 1.01, 0.95);
+  col *= mix(shadowTint, hiTint, smoothstep(0.15, 0.78, luma));
 
   // High contrast mode
   if (uContrast > 0.5) {

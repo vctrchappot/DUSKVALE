@@ -873,8 +873,8 @@ export class Game {
     }
   }
 
-  // ------------------------------------------------------------ Movement
-  private moveEnt(e: { x: number; y: number; float?: boolean }, dx: number, dy: number): boolean {
+  // ------------------------------------------------------------ Movement (+ Light Movement-Assist)
+  moveEntWithAssist(e: { x: number; y: number; float?: boolean }, dx: number, dy: number, allowDrift: boolean): boolean {
     const canStep = (nx: number, ny: number): boolean => {
       if (!this.world.isSolid(nx, ny, e.x, e.y)) return true;
       if (e.float) {
@@ -889,6 +889,23 @@ export class Game {
       if (canStep(nx, e.y)) {
         e.x = nx;
         moved = true;
+      } else if (allowDrift) {
+        // Corner-slide drift around obstacle edges (trees, pillars, walls, doorways)
+        const step = Math.abs(dx) * 0.72 / ASP;
+        for (const probe of [0.35, 0.7, 1.05]) {
+          const upClear = canStep(nx, e.y - probe) && canStep(e.x, e.y - step);
+          const dnClear = canStep(nx, e.y + probe) && canStep(e.x, e.y + step);
+          if (upClear && !dnClear) {
+            e.y -= step;
+            moved = true;
+            break;
+          }
+          if (dnClear && !upClear) {
+            e.y += step;
+            moved = true;
+            break;
+          }
+        }
       }
     }
     if (dy) {
@@ -896,9 +913,51 @@ export class Game {
       if (canStep(e.x, ny)) {
         e.y = ny;
         moved = true;
+      } else if (allowDrift) {
+        const step = Math.abs(dy) * ASP * 0.72;
+        for (const probe of [0.4, 0.85, 1.25]) {
+          const leftClear = canStep(e.x - probe, ny) && canStep(e.x - step, e.y);
+          const rightClear = canStep(e.x + probe, ny) && canStep(e.x + step, e.y);
+          if (leftClear && !rightClear) {
+            e.x -= step;
+            moved = true;
+            break;
+          }
+          if (rightClear && !leftClear) {
+            e.x += step;
+            moved = true;
+            break;
+          }
+        }
       }
     }
     return moved;
+  }
+
+  private moveEnt(e: { x: number; y: number; float?: boolean }, dx: number, dy: number): boolean {
+    return this.moveEntWithAssist(e, dx, dy, false);
+  }
+
+  /** Subtle road-follow drift: when walking along a curving road, softly nudges toward road centerline. */
+  private computeRoadDrift(x: number, y: number, ix: number, iy: number): { dx: number; dy: number } {
+    const isRoad = (t: number) => t === T.ROAD || t === T.BRIDGE;
+    const cur = this.world.typeAt(x, y);
+    if (!isRoad(cur)) return { dx: 0, dy: 0 };
+
+    const lookDist = 2.4;
+    const ax = x + ix * lookDist;
+    const ay = y + (iy * lookDist) / ASP;
+    if (isRoad(this.world.typeAt(ax, ay))) return { dx: 0, dy: 0 };
+
+    // Perpendicular unit vector (-iy, ix)
+    const px = -iy;
+    const py = ix;
+    const side = 1.6;
+    const leftRoad = isRoad(this.world.typeAt(ax + px * side, ay + (py * side) / ASP));
+    const rightRoad = isRoad(this.world.typeAt(ax - px * side, ay - (py * side) / ASP));
+    if (leftRoad && !rightRoad) return { dx: px * 0.24, dy: py * 0.24 };
+    if (rightRoad && !leftRoad) return { dx: -px * 0.24, dy: -py * 0.24 };
+    return { dx: 0, dy: 0 };
   }
 
   private stepToward(e: EnemyEntity, tx: number, ty: number, spd: number, dt: number): boolean {
@@ -2136,24 +2195,37 @@ export class Game {
       }
     }
 
-    // Smooth acceleration & deceleration (~0.08s response)
+    // Smooth acceleration & deceleration (~0.08s response) + light Movement-Assist
+    const rune = p.runeId ? RUNES[p.runeId] : null;
     if (p.roll > 0) {
       const sp = 36 * (0.42 + p.roll / 0.32);
       p.vx = p.rollX * sp;
       p.vy = p.rollY * sp;
-      this.moveEnt(p, p.vx * dt, (p.vy * dt) / ASP);
+      this.moveEntWithAssist(p, p.vx * dt, (p.vy * dt) / ASP, true);
       if (Math.random() < 0.5) this.spawnP(p.x, p.y, rand(-2, 2), 0, 0.35, '.', 0.45, 0.42, 0.38, 0);
     } else {
-      let maxSpd = 14.5;
+      let maxSpd = 14.5 * (rune?.moveSpeedMult ?? 1);
       if (p.drink > 0) maxSpd = 5;
       else if (p.atk > 0) maxSpd = 5.5;
-      const targetVx = ix * maxSpd;
-      const targetVy = iy * maxSpd;
+
+      let dirX = ix;
+      let dirY = iy;
+      if (il > 0) {
+        const drift = this.computeRoadDrift(p.x, p.y, ix, iy);
+        dirX += drift.dx;
+        dirY += drift.dy;
+        const dl = Math.hypot(dirX, dirY) || 1;
+        dirX /= dl;
+        dirY /= dl;
+      }
+
+      const targetVx = dirX * maxSpd;
+      const targetVy = dirY * maxSpd;
       const accel = 1 - Math.exp(-dt / 0.075);
       p.vx += (targetVx - p.vx) * accel;
       p.vy += (targetVy - p.vy) * accel;
       if (Math.hypot(p.vx, p.vy) > 0.15) {
-        this.moveEnt(p, p.vx * dt, (p.vy * dt) / ASP);
+        this.moveEntWithAssist(p, p.vx * dt, (p.vy * dt) / ASP, true);
         p.moving = il > 0;
         if (p.moving) p.walkT += dt;
         // Grass trample trail & shallow water ripples

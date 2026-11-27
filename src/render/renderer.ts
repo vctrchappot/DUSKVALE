@@ -503,8 +503,8 @@ export class SceneRenderer {
       }
     }
 
-    // --------------------------------------------------------- 2. Proportioned 2.5D Stone Walls & Archways
-    // Walls are 14 cells tall (towers 20 cells), matching 14x19 human scale!
+    // --------------------------------------------------------- 2. Proportioned 2.5D Stone Walls, Battlements & Ground Shadows
+    // Walls are 14 cells tall (towers 20 cells), matching human scale, with ground-cast shadows & Gothic archways.
     for (let y = 0; y < rows + 20; y++) {
       const cellY = this.camCellY + y;
       const wy = Math.floor(cellY / WORLD_SCALE_Y);
@@ -518,9 +518,35 @@ export class SceneRenderer {
 
         const facadeH = tp === T.TOWER_WALL ? 20 : 14;
         const isArch = tp === T.ARCH;
-        for (let fh = 1; fh <= facadeH; fh++) {
-          // Leave clean 9-cell walk-through arch opening
-          if (isArch && fh <= 9) continue;
+
+        // Soft 3-cell ground drop shadow directly south of solid wall base
+        if (!isArch) {
+          for (let sh = 1; sh <= 3; sh++) {
+            const sy = y + sh;
+            if (sy >= 0 && sy < rows) {
+              const si = sy * cols + x;
+              const k = 0.62 + sh * 0.11;
+              this.BR[si] *= k;
+              this.BG[si] *= k;
+              this.BB[si] *= k * 1.04;
+              this.BGR[si] *= k;
+              this.BGG[si] *= k;
+              this.BGB[si] *= k * 1.04;
+            }
+          }
+        }
+
+        // Battlement merlon notch at very top of walls/towers
+        const isMerlon = ((Math.floor(cellX / 3) & 1) === 0);
+        const topH = isMerlon ? facadeH + 1 : facadeH;
+        const subX = ((cellX % WORLD_SCALE_X) + WORLD_SCALE_X) % WORLD_SCALE_X;
+
+        for (let fh = 1; fh <= topH; fh++) {
+          // Rounded Gothic archway opening (clear walk-through height 9..10)
+          if (isArch) {
+            const archClear = subX === 0 || subX === WORLD_SCALE_X - 1 ? 8 : 10;
+            if (fh <= archClear) continue;
+          }
           const fy = y - fh;
           if (fy < 0 || fy >= rows) continue;
 
@@ -536,26 +562,26 @@ export class SceneRenderer {
           const stagger = (brickRow & 1) * 3;
           const isMortarV = ((cellX + stagger) % 6 + 6) % 6 === 0;
           const isMortarH = (fh % 2) === 0;
-          const topCap = fh === facadeH;
-          const ao = 0.68 + 0.34 * (fh / facadeH);
+          const topCap = fh === topH;
+          const isArchRim = isArch && fh === (subX === 0 || subX === WORLD_SCALE_X - 1 ? 9 : 11);
+          const ao = 0.64 + 0.38 * (fh / topH);
           const blockTint = 0.94 + noise(Math.floor((cellX + stagger) / 6) * 0.8, brickRow * 0.8, 71) * 0.12;
 
-          let r = (topCap ? 0.68 : 0.52) * ao * blockTint;
-          let g = (topCap ? 0.67 : 0.51) * ao * blockTint;
-          let b = (topCap ? 0.68 : 0.54) * ao * blockTint;
-          let ch = topCap ? 61 : isMortarH ? 45 : isMortarV ? 124 : 35; // = - | #
+          let r = (topCap || isArchRim ? 0.72 : 0.52) * ao * blockTint;
+          let g = (topCap || isArchRim ? 0.71 : 0.51) * ao * blockTint;
+          let b = (topCap || isArchRim ? 0.73 : 0.55) * ao * blockTint;
+          let ch = isArchRim ? 95 : topCap ? 61 : isMortarH ? 45 : isMortarV ? 124 : 35;
 
-          if (isMortarV || isMortarH) {
-            r *= 0.78;
-            g *= 0.78;
+          if ((isMortarV || isMortarH) && !topCap && !isArchRim) {
+            r *= 0.76;
+            g *= 0.76;
             b *= 0.82;
           }
-          // Subtle moss patches on top battlements
-          if (topCap && noise(cellX * 0.14, cellY * 0.14, 83) > 0.64) {
+          if (topCap && noise(cellX * 0.14, cellY * 0.14, 83) > 0.62) {
             r = 0.26;
-            g = 0.48;
+            g = 0.5;
             b = 0.24;
-            ch = 34; // "
+            ch = 34;
           }
 
           this.putCell(x, fy, ch, r, g, b, 0, occAlpha, 0.38);

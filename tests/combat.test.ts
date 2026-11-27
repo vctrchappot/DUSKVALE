@@ -47,4 +47,18 @@ describe('Combat, RPG & Camera (Stage 2)', () => {
     cam.addShake(0.9, { ...DEFAULT_OPTIONS, reduceCameraMotion: true });
     expect(cam.shakePower).toBe(0);
   });
+
+  it('movement assist smoothly drifts around obstacle corners instead of getting stuck', () => {
+    const w = new World();
+    const g = new Game(w, new AudioEngine(), { ...DEFAULT_OPTIONS });
+    g.newGame(1);
+    // Find a pillar in Glutsenke and place player just west of its top edge
+    const pillar = w.objectsIn(-10, -10, 10, 10).find((o) => o.kind === 'pillar')!;
+    g.player.x = pillar.x - 0.15;
+    g.player.y = pillar.y + 0.2;
+    const startY = g.player.y;
+    const moved = g.moveEntWithAssist(g.player, 0.3, 0, true);
+    expect(moved).toBe(true);
+    expect(g.player.y).not.toBe(startY);
+  });
 });
