@@ -57,7 +57,7 @@ html, body {
   font-size: calc(13px * var(--ui-scale));
 }
 
-/* Player panel top-left with ASCII portrait */
+/* Player panel top-left with crisp monochrome ASCII portrait (inspired by reference HUD) */
 #playerPanel {
   position: absolute;
   left: 16px;
@@ -65,46 +65,50 @@ html, body {
   display: flex;
   gap: 12px;
   align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--line);
+  background: rgba(3, 5, 8, 0.92);
+  border: 1.5px solid rgba(242, 240, 234, 0.85);
   padding: 8px 12px;
-  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.65);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.85);
 }
 #portrait {
   margin: 0;
   font-size: 9px;
   line-height: 1.05;
-  color: var(--gold);
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid var(--line);
+  color: #e6e2d8;
+  background: #030407;
+  border: 1px solid rgba(242, 240, 234, 0.35);
   padding: 4px 6px;
 }
 #pBars {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-width: 175px;
+  min-width: 180px;
 }
 #pLvl {
   font-size: 12px;
-  color: var(--gold);
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  color: #f4f1ea;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 .barRow {
   position: relative;
-  height: 14px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  height: 13px;
+  background: #080a0e;
+  border: 1px solid rgba(242, 240, 234, 0.65);
 }
-.barRow.thin { height: 7px; }
+.barRow.thin { height: 6px; border-color: rgba(242, 240, 234, 0.35); }
 .barFill {
   height: 100%;
   transition: width 0.08s linear;
 }
-.barFill.hp { background: linear-gradient(90deg, #9d231d, var(--blood)); }
-.barFill.mp { background: linear-gradient(90deg, #2b5db0, var(--mana)); }
-.barFill.st { background: linear-gradient(90deg, #4b7d34, var(--stamina)); }
+.barFill.hp {
+  background: repeating-linear-gradient(90deg, #d8d4cc 0 4px, #080a0e 4px 6px);
+}
+.barFill.mp {
+  background: repeating-linear-gradient(90deg, #9ac4f8 0 4px, #080a0e 4px 6px);
+}
+.barFill.st { background: linear-gradient(90deg, #4b8a3b, #8ec267); }
 .barText {
   position: absolute;
   inset: 0;

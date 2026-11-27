@@ -66,23 +66,24 @@ void main() {
     float gx = mod(glyphId, uAtlasGrid.x);
     float gy = floor(glyphId / uAtlasGrid.x);
     vec2 atlasUv = (vec2(gx, gy) + cellLocal) / uAtlasGrid;
-    alpha = texture(uAtlas, atlasUv).a;
+    // Crisp glyph stroke curve for razor-sharp small typography
+    alpha = smoothstep(0.14, 0.72, texture(uAtlas, atlasUv).a);
   }
 
-  // Combine background cell colour with foreground glyph
+  // Deep obsidian void backdrop with razor-sharp glowing typographic ink
   vec3 col = mix(bg.rgb, fg.rgb, alpha);
   // Emissive boost stored in fg.a
   float em = fg.a * alpha;
-  col += fg.rgb * em * 0.48;
+  col += fg.rgb * em * 0.55;
 
-  // ACES filmic tonemap
-  col = acesToneMap(col * 1.22);
+  // ACES filmic tonemap with rich dark-fantasy contrast
+  col = acesToneMap(col * 1.28);
 
-  // Subtle dark-fantasy split-toning: cool indigo shadows, warm parchment highlights
+  // Subtle dark-fantasy split-toning: cool midnight shadows, warm ember highlights
   float luma = dot(col, vec3(0.299, 0.587, 0.114));
-  vec3 shadowTint = vec3(0.94, 0.97, 1.08);
-  vec3 hiTint = vec3(1.04, 1.01, 0.95);
-  col *= mix(shadowTint, hiTint, smoothstep(0.15, 0.78, luma));
+  vec3 shadowTint = vec3(0.92, 0.96, 1.08);
+  vec3 hiTint = vec3(1.04, 1.01, 0.96);
+  col *= mix(shadowTint, hiTint, smoothstep(0.12, 0.76, luma));
 
   // High contrast mode
   if (uContrast > 0.5) {
@@ -97,9 +98,9 @@ void main() {
     col = mix(col, vec3(0.78, 0.84, 1.0), clamp(uFlash * 0.28, 0.0, 0.35));
   }
 
-  // Store bloom eligibility in alpha (bright emissive cells glow)
+  // Selective bloom on emissive fires, moon reflection, glowing eyes/blades & bright highlights
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
-  float bloomMask = clamp(em * 1.15 + max(0.0, lum - 0.72) * 1.4, 0.0, 1.0);
+  float bloomMask = clamp(em * 1.25 + max(0.0, lum - 0.66) * 1.5, 0.0, 1.0);
   outColor = vec4(col, bloomMask);
 }`;
 

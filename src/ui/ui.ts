@@ -216,7 +216,7 @@ export class GameUI implements GameUICallbacks {
     if (playing) {
       const armor = ARMORS[p.armorId] || ARMORS.wanderer_plate;
       this.el.portrait.textContent = buildPlayerPortraitAscii(armor);
-      this.el.pLvl.textContent = `Stufe ${p.lvl}${p.attrPoints > 0 ? ` (+${p.attrPoints})` : ''}`;
+      this.el.pLvl.textContent = `${G.options.playerName} · St. ${p.lvl}${p.attrPoints > 0 ? ` (+${p.attrPoints})` : ''} · ${this.currentFps} FPS (${this.R.lastRenderMs.toFixed(1)}ms)`;
 
       const maxHp = G.maxHp();
       const maxMp = G.maxMp();

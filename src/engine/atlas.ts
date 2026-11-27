@@ -8,15 +8,15 @@ export interface GlyphAtlas {
   rows: number;
   cellW: number; // CSS px
   cellH: number; // CSS px
-  texCellW: number; // 2x oversampled px
-  texCellH: number; // 2x oversampled px
+  texCellW: number; // oversampled px
+  texCellH: number; // oversampled px
   index: Int16Array;
 }
 
 export function buildGlyphString(): string {
   let s = ' '; // index 0 = empty space
   for (let c = 33; c < 127; c++) s += String.fromCharCode(c);
-  s += '·≈░▒▓█•◆◇▲✠✦»«';
+  s += '·≈░▒▓█•◆◇▲✠✦»«°';
   return s;
 }
 
@@ -28,11 +28,12 @@ export function createGlyphAtlas(fontPx: number, dpr: number): GlyphAtlas {
   mctx.font = `600 ${fontPx}px ${FONT_FAMILY}`;
   const measured = mctx.measureText('M').width;
 
-  const cellW = Math.max(4, Math.round(measured));
-  const cellH = Math.max(7, Math.round(cellW * 1.78));
+  // Tight typographic packing (aspect ~1.48) for fine woven ASCII tapestry look
+  const cellW = Math.max(4, Math.round(measured * 0.96));
+  const cellH = Math.max(6, Math.round(cellW * 1.48));
 
-  // 2x oversampling on top of DPR for crisp small ASCII glyphs
-  const oversample = Math.min(3, Math.max(2, dpr * 2));
+  // High oversampling so tiny 5-9px glyphs remain razor-sharp
+  const oversample = Math.min(4, Math.max(2.5, dpr * 2.5));
   const texCellW = Math.round(cellW * oversample);
   const texCellH = Math.round(cellH * oversample);
 
@@ -45,7 +46,8 @@ export function createGlyphAtlas(fontPx: number, dpr: number): GlyphAtlas {
   canvas.height = rows * texCellH;
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = `600 ${Math.round(fontPx * oversample)}px ${FONT_FAMILY}`;
+  // Render slightly fuller font size inside cell for dense interwoven texture
+  ctx.font = `600 ${Math.round(fontPx * 1.12 * oversample)}px ${FONT_FAMILY}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ffffff';
@@ -56,7 +58,7 @@ export function createGlyphAtlas(fontPx: number, dpr: number): GlyphAtlas {
     const gx = k % cols;
     const gy = (k / cols) | 0;
     if (k > 0) {
-      ctx.fillText(ch, gx * texCellW + texCellW * 0.5, gy * texCellH + texCellH * 0.54);
+      ctx.fillText(ch, gx * texCellW + texCellW * 0.5, gy * texCellH + texCellH * 0.53);
     }
     index[ch.charCodeAt(0)] = k;
   }

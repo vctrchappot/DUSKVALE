@@ -26,18 +26,18 @@ export interface GameOptions {
 export const ZOOM_PX: Record<ZoomLevel, number> = {
   nah: 9,
   mittel: 7,
-  fern: 6,
+  fern: 5,
 };
 
-const OPT_KEY = 'duskvale.options.v2';
+const OPT_KEY = 'duskvale.options.v3';
 
 export const DEFAULT_OPTIONS: GameOptions = {
-  zoom: 'nah',
+  zoom: 'mittel',
   bloom: true,
   particlesDensity: 1.0,
   grassDensity: 1.0,
   shadows: true,
-  gamma: 1.05,
+  gamma: 1.08,
   highContrast: false,
   uiScale: 1.0,
   reduceCameraMotion: false,
