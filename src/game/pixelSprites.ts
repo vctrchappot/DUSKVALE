@@ -392,10 +392,22 @@ export function buildPropSprite(kind: string, variant = 0, animFrame = 0): Pixel
       const darkMoss: [number, number, number] = [0.07, 0.17, 0.14];
       const hiMoss: [number, number, number] = [0.25, 0.43, 0.34];
 
-      // Tall slender weathered bark trunk (just like Image 1!)
+      // Round trunk: moonlit west flank, deep east flank, vertical furrows, and the
+      // shade of the crown above darkening its upper part.
       const trunkW = variant === 2 ? 5 : 4;
       const trunkTop = Math.round(h * 0.28);
-      fillRect(s, cx - (trunkW >> 1), trunkTop, trunkW, h - trunkTop, bark, 5, 0);
+      const trunkX = cx - (trunkW >> 1);
+      const crownBase = h * 0.62;
+      for (let y = trunkTop; y < h; y++) {
+        for (let i = 0; i < trunkW; i++) {
+          const nx = (i + 0.5) / trunkW * 2 - 1;
+          const round = Math.sqrt(Math.max(0, 1 - nx * nx * 0.85));
+          const key = 0.42 + 0.78 * round * (1 - nx * 0.5);
+          const furrow = noise((trunkX + i) * 1.7, y * 0.22, 23 + variant) < 0.38 ? 0.68 : 1;
+          const under = y < crownBase ? 0.6 + 0.4 * ((y - trunkTop) / (crownBase - trunkTop)) ** 2 : 1;
+          setPx(s, trunkX + i, y, bark, key * furrow * under, 5, 0);
+        }
+      }
       // Flared mossy roots
       drawLine(s, cx - 2, h - 3, cx - 5, h - 1, bark, 1, 5, 0);
       drawLine(s, cx + 2, h - 3, cx + 5, h - 1, bark, 1, 5, 0);

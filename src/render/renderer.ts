@@ -622,6 +622,23 @@ export class SceneRenderer {
           }
         }
 
+        // Terrace relief: raised ground catches more moonlight, its north lip and west
+        // flank glint, its east flank turns away, and the ground at a cliff foot sits in shadow.
+        if (!st.water) {
+          const subX = ((cellX % WORLD_SCALE_X) + WORLD_SCALE_X) % WORLD_SCALE_X;
+          let relief = 0.88 + Math.min(el, 4) * 0.06;
+          if (subY === 0) {
+            const northEl = W.elevAt(baseWx, baseWy - 1);
+            if (northEl < el) relief *= 1.22;
+            else if (northEl > el) relief *= 0.58;
+          }
+          if (subX === 0 && W.elevAt(baseWx - 1, baseWy) < el) relief *= 1.12;
+          if (subX === WORLD_SCALE_X - 1 && W.elevAt(baseWx + 1, baseWy) < el) relief *= 0.74;
+          r *= relief;
+          g *= relief;
+          b *= relief;
+        }
+
         this.CHR[i] = code;
         this.MAT[i] = tp;
         this.ELEV[i] = el;
@@ -1186,6 +1203,19 @@ export class SceneRenderer {
         let bgr = this.BGR[i] * lr;
         let bgg = this.BGG[i] * lg;
         let bgb = this.BGB[i] * lb;
+
+        // Aerial perspective: the upper screen is farther away, so it loses contrast
+        // into a cool night haze while the foreground keeps full depth.
+        const far = 1 - y / rows;
+        const haze = far * far * 0.2 * (1 - e);
+        if (haze > 0.004) {
+          r = lerp(r, 0.07, haze);
+          g = lerp(g, 0.09, haze);
+          b = lerp(b, 0.14, haze);
+          bgr = lerp(bgr, 0.03, haze);
+          bgg = lerp(bgg, 0.04, haze);
+          bgb = lerp(bgb, 0.07, haze);
+        }
 
         if (fogA > 0.02) {
           const fo = fogA * (1 - e * 0.8) * clamp(noise((this.camCellX + x) * 0.022 + t * 0.15, (this.camCellY + y) * 0.04, 9), 0, 1);
