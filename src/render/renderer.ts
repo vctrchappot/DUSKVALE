@@ -1,4 +1,5 @@
 import { buildKnightSprite, knightAnimationFrame } from '../game/knight.ts';
+import { buildEnemySprite } from '../game/creatures.ts';
 import { SHADED_TILE, FINE_STROKE, STROKE_AXES, GRASS_TUFT, STONE_FACE, WATER_LINE } from '../engine/atlas.ts';
 import { TextOverlay, type OverlayArrow, type OverlayBar, type OverlayLabel } from '../engine/textOverlay.ts';
 import { ASP, clamp, hash, lerp, noise, TAU } from '../engine/util.ts';
@@ -322,7 +323,7 @@ export class SceneRenderer {
           const g = flash ? 0.96 : lerp(spr.g[si], rim?.[1] ?? 0, accent);
           const b = flash ? 0.9 : lerp(spr.b[si], rim?.[2] ?? 0, accent);
           const underR = this.BGR[idx], underG = this.BGG[idx], underB = this.BGB[idx];
-          this.putCell(gx, gy, SHADED_TILE + mask, r, g, b, flash ? 0.8 : 0, alpha);
+          this.putCell(gx, gy, SHADED_TILE + mask, r, g, b, flash ? 0.8 : spr.em[si], alpha);
           const ink = si * 3;
           this.BGR[idx] = edge ? underR : lerp(underR, flash ? 0.7 : detail.ground[ink], alpha);
           this.BGG[idx] = edge ? underG : lerp(underG, flash ? 0.6 : detail.ground[ink + 1], alpha);
@@ -936,7 +937,7 @@ export class SceneRenderer {
         const ey = lerp(e.prevY, e.y, alphaInterp);
         const pose = e.state === 'attack' || (e.state === 'windup' && e.st < 0.2) ? 'attack' : 'idle';
         const frame = Math.floor(e.walkT * 5) % 2;
-        const spr = this.getCachedSprite(`en:${e.type}:${pose}:${frame}`, () => buildCreatureSprite(e.type, pose, frame));
+        const spr = this.getCachedSprite(`en:${e.type}:${pose}:${frame}`, () => buildEnemySprite(e.type, pose, frame));
         const teleFlash = e.state === 'windup' && e.st < 0.28 && ((t * 18) | 0) % 2 === 0;
         const lift = e.float ? Math.round(Math.sin(t * 2.5 + e.hx) * 1.2) - 1 : 0;
         const eliteRim = e.eliteAffix ? ELITE_AFFIXES[e.eliteAffix].rimColor : null;
