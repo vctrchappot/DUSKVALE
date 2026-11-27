@@ -231,6 +231,7 @@ export const BP: Record<string, Blueprint> = {
 
 export const LANDMARKS: Landmark[] = [
   { id: 'start', name: 'Glutsenke', sub: 'Lager der letzten Glut', x: 0, y: 0, r: 34, biome: 'clear', bp: 'start' },
+  { id: 'crypt_start', name: 'Krypta der Glut', sub: 'Betretbarer 2.5D-Dungeon', x: 26, y: -14, r: 22, biome: 'clear', bp: 'cave' },
   { id: 'lakecastle', name: 'Burg am See', sub: 'Versunkene Wacht', x: 64, y: -32, r: 32, biome: 'lake', bp: 'lakecastle' },
   { id: 'barrow', name: 'Hügelgrab des Heiligen Vael', sub: 'Siegel des Knochens', x: -175, y: -28, r: 62, biome: 'moor', bp: 'barrow' },
   { id: 'chapel', name: 'Die Ertrunkene Kapelle', sub: 'Siegel der Flut', x: 190, y: 36, r: 72, biome: 'swamp', bp: 'chapel' },

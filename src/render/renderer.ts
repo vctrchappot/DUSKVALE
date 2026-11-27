@@ -4,6 +4,7 @@ import { WebGLAsciiRenderer } from '../engine/webgl.ts';
 import type { EnemyEntity, Game, NpcEntity } from '../game/game.ts';
 import { buildCreatureSprite, buildKnightSprite, buildPropSprite, type AnimPose, type PixelSprite } from '../game/pixelSprites.ts';
 import { ARMORS, WEAPONS } from '../game/rpg.ts';
+import { ELITE_AFFIXES } from '../game/sideQuests.ts';
 import type { RemotePlayerEntity } from '../net/client.ts';
 import { T, WATERY, type TerrainId, type WorldObject } from '../world/types.ts';
 
@@ -767,11 +768,12 @@ export class SceneRenderer {
         const spr = this.getCachedSprite(`en:${e.type}:${pose}:${frame}`, () => buildCreatureSprite(e.type, pose, frame));
         const teleFlash = e.state === 'windup' && e.st < 0.28 && ((t * 18) | 0) % 2 === 0;
         const lift = e.float ? Math.round(Math.sin(t * 2.5 + e.hx) * 1.2) - 1 : 0;
+        const eliteRim = e.eliteAffix ? ELITE_AFFIXES[e.eliteAffix].rimColor : null;
         this.drawPixelSprite(spr, ex, ey, {
           flip: e.face < 0,
           flash: e.flash > 0 || teleFlash,
           alpha: e.float ? 0.86 : 1,
-          rim: e.state === 'stagger' ? [1.0, 0.88, 0.35] : [1.0, 0.32, 0.28],
+          rim: e.state === 'stagger' ? [1.0, 0.88, 0.35] : eliteRim || [1.0, 0.32, 0.28],
           liftCells: lift,
           isEntity: true,
         });
@@ -1007,16 +1009,18 @@ export class SceneRenderer {
       for (const e of G.enemies) {
         const isLocked = G.lockedTarget === e;
         if (isLocked) lockTarget = { wx: e.x, wy: e.y - 4.0 };
-        if (!e.boss && (e.hp < e.maxHp || isLocked || e.state === 'stagger')) {
+        const isElite = !!e.eliteAffix;
+        if (!e.boss && (e.hp < e.maxHp || isLocked || e.state === 'stagger' || isElite)) {
+          const displayName = isElite ? `${ELITE_AFFIXES[e.eliteAffix!].prefix} ${e.d.name}` : e.d.name;
           bars.push({
             wx: e.x,
             wy: e.y - 10.2,
             ratio: e.hp / e.maxHp,
             poiseRatio: e.poise / e.maxPoise,
-            widthPx: 54,
-            color: e.state === 'stagger' ? '#ffbe4f' : '#d6453d',
-            name: isLocked ? e.d.name : undefined,
-            locked: isLocked,
+            widthPx: isElite ? 66 : 54,
+            color: e.state === 'stagger' ? '#ffbe4f' : isElite ? '#c864ff' : '#d6453d',
+            name: isLocked || isElite ? displayName : undefined,
+            locked: isLocked || isElite,
           });
         }
       }

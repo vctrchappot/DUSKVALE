@@ -286,9 +286,9 @@ function boot(): void {
     inp.wx = wpos.wx;
     inp.wy = wpos.wy;
 
-    // Background Web Worker chunk prefetching around camera
+    // Background Web Worker chunk prefetching around camera (overworld only)
     prefetchT -= frameDt;
-    if (chunkWorker && prefetchT <= 0) {
+    if (chunkWorker && !game.inDungeon && prefetchT <= 0) {
       prefetchT = 0.4;
       const ccx = Math.floor(game.camera.x) >> 5;
       const ccy = Math.floor(game.camera.y) >> 5;
@@ -304,7 +304,7 @@ function boot(): void {
     }
 
     objs.length = 0;
-    world.objectsIn(game.camera.x - 64, game.camera.y - 44, game.camera.x + 64, game.camera.y + 44, objs);
+    game.world.objectsIn(game.camera.x - 64, game.camera.y - 44, game.camera.x + 64, game.camera.y + 44, objs);
 
     let steps = 0;
     while (accum >= FIXED_DT && steps < 4) {

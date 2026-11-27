@@ -3,11 +3,20 @@ import type { InputState } from '../engine/input.ts';
 import type { GameOptions } from '../engine/options.ts';
 import { ASP, clamp, dist, hash, lerp, pick, rand, TAU } from '../engine/util.ts';
 import { GrassAndWaterField } from '../world/grass.ts';
+import { DungeonWorld } from '../world/dungeon.ts';
 import { BIOMES, T, WATERY, type BiomeId, type WorldFeature, type WorldObject } from '../world/types.ts';
 import { World } from '../world/world.ts';
 import { SmoothCamera } from './camera.ts';
 import { evaluateMainQuest, ONBOARDING_HINTS, type ActiveQuestSummary } from './quests.ts';
 import { ARMORS, RINGS, SKILLS, WEAPONS, weaponUpgradeCost, xpForNextLevel } from './rpg.ts';
+import {
+  ELITE_AFFIXES,
+  evaluateSideQuests,
+  RUNES,
+  type EliteAffixId,
+  type RuneId,
+  type SideQuestStatus,
+} from './sideQuests.ts';
 import type { SaveSlotData, SerializablePlayer, SkillId, StatusEffect } from './types.ts';
 
 const PCY = 2.0;
@@ -288,9 +297,11 @@ export interface PlayerEntity {
   weaponUpgrade: number;
   armorId: string;
   ringId: string | null;
+  runeId: RuneId | null;
   inventoryWeapons: string[];
   inventoryArmors: string[];
   inventoryRings: string[];
+  inventoryRunes: RuneId[];
   unlockedSkills: SkillId[];
   skillCD: Record<SkillId, number>;
   atk: number;
@@ -354,6 +365,8 @@ export interface EnemyEntity {
   minion: boolean;
   rad: number;
   statuses: StatusEffect[];
+  eliteAffix?: EliteAffixId;
+  isCryptGuardian?: boolean;
 }
 
 export interface NpcEntity {
@@ -460,7 +473,10 @@ export interface GameUICallbacks {
 const SAVE_PREFIX = 'duskvale.save.v2.slot';
 
 export class Game {
-  readonly world: World;
+  readonly overworld: World;
+  world: World | DungeonWorld;
+  inDungeon = false;
+  activeDungeon: DungeonWorld | null = null;
   readonly audio: AudioEngine;
   readonly camera = new SmoothCamera();
   readonly grassField = new GrassAndWaterField();
@@ -477,7 +493,9 @@ export class Game {
     bosses: new Set<string>(),
     lore: new Set<string>(),
     chests: new Set<string>(),
-    knownLandmarks: new Set<string>(['start']),
+    knownLandmarks: new Set<string>(['start', 'crypt_start']),
+    claimedSideQuests: new Set<string>(),
+    dungeonsCleared: 0,
     gateOpen: false,
     victory: false,
     talkedMaren: false,
@@ -532,6 +550,7 @@ export class Game {
   quest: ActiveQuestSummary;
 
   constructor(world: World, audio: AudioEngine, options: GameOptions) {
+    this.overworld = world;
     this.world = world;
     this.audio = audio;
     this.options = options;
@@ -569,9 +588,11 @@ export class Game {
       weaponUpgrade: 0,
       armorId: 'wanderer_plate',
       ringId: null,
+      runeId: null,
       inventoryWeapons: ['iron_sword'],
       inventoryArmors: ['wanderer_plate'],
       inventoryRings: [],
+      inventoryRunes: [],
       unlockedSkills: ['flame_slash', 'ember_bolt', 'ash_shield', 'leap_strike'],
       skillCD: { flame_slash: 0, ember_bolt: 0, ash_shield: 0, leap_strike: 0 },
       atk: 0,
@@ -620,9 +641,89 @@ export class Game {
   playerDmg(p = this.player): number {
     const w = WEAPONS[p.weaponId] || WEAPONS.iron_sword;
     const ring = p.ringId ? RINGS[p.ringId] : null;
+    const rune = p.runeId ? RUNES[p.runeId] : null;
     const base = 18 + (p.mig - 1) * 4.5 + p.weaponUpgrade * 4;
     const comboMult = p.combo === 2 ? 1.25 : p.combo === 1 ? 1.1 : 1.0;
-    return base * w.dmgMult * comboMult * (1 + (ring?.dmgBonus ?? 0));
+    return base * w.dmgMult * comboMult * (1 + (ring?.dmgBonus ?? 0)) * (rune?.dmgMult ?? 1);
+  }
+
+  getSideQuests(): SideQuestStatus[] {
+    const totalKills = Object.values(this.bestiary).reduce((a, b) => a + b, 0);
+    return evaluateSideQuests({
+      dungeonsCleared: this.flags.dungeonsCleared,
+      totalKills,
+      loreCount: this.flags.lore.size,
+      chestsCount: this.flags.chests.size,
+      claimedIds: this.flags.claimedSideQuests,
+    });
+  }
+
+  claimSideQuest(id: string): boolean {
+    const sq = this.getSideQuests().find((q) => q.def.id === id);
+    if (!sq || !sq.completed || sq.claimed) return false;
+    this.flags.claimedSideQuests.add(id);
+    this.player.embers += sq.def.rewardEmbers;
+    this.grantXp(sq.def.rewardXp);
+    if (sq.def.rewardRune && !this.player.inventoryRunes.includes(sq.def.rewardRune)) {
+      this.player.inventoryRunes.push(sq.def.rewardRune);
+      if (!this.player.runeId) this.player.runeId = sq.def.rewardRune;
+    }
+    this.audio.chime();
+    this.ui?.banner('AUFTRAG ABGESCHLOSSEN', `${sq.def.title} · +${sq.def.rewardEmbers} Glut`, 'gold', 3.5);
+    this.save();
+    return true;
+  }
+
+  enterDungeon(id: string, name: string, seed: number): void {
+    const d = new DungeonWorld(id, name, seed, { x: this.player.x, y: this.player.y });
+    this.activeDungeon = d;
+    this.world = d;
+    this.inDungeon = true;
+    this.resetWorldEnemies();
+    this.npcs = [];
+    this.particles.length = 0;
+    this.decals.clear();
+    this.player.x = d.spawnPos.x;
+    this.player.y = d.spawnPos.y;
+    this.player.prevX = d.spawnPos.x;
+    this.player.prevY = d.spawnPos.y;
+    this.camera.snap(d.spawnPos.x, d.spawnPos.y);
+    this.spawnTimer = 0.05;
+    this.audio.chime();
+    this.ui?.banner(name.toUpperCase(), '2.5D-Krypta · Bezwinge den Elite-Wächter', 'pale', 3.6);
+  }
+
+  exitDungeon(): void {
+    if (!this.inDungeon || !this.activeDungeon) return;
+    const ret = this.activeDungeon.returnPos;
+    this.world = this.overworld;
+    this.activeDungeon = null;
+    this.inDungeon = false;
+    this.resetWorldEnemies();
+    this.npcs = [];
+    this.particles.length = 0;
+    this.decals.clear();
+    this.player.x = ret.x;
+    this.player.y = ret.y + 1.5;
+    this.player.prevX = this.player.x;
+    this.player.prevY = this.player.y;
+    this.camera.snap(this.player.x, this.player.y);
+    this.spawnTimer = 0.05;
+    this.audio.chime();
+    this.ui?.banner('OBERWELT', 'Du kehrst in die Dämmerung zurück', 'pale', 2.5);
+  }
+
+  startBossRematch(bossType: string): void {
+    if (this.inDungeon) this.exitDungeon();
+    this.resetWorldEnemies();
+    const p = this.player;
+    const boss = this.createEnemy(bossType, p.x, p.y - 10, `rematch@${bossType}`, 'rematch');
+    boss.maxHp = Math.round(boss.maxHp * 1.35);
+    boss.hp = boss.maxHp;
+    boss.eliteAffix = 'burning';
+    boss.state = 'chase';
+    this.enemies.push(boss);
+    this.engageBoss(boss);
   }
 
   sigils(): number {
@@ -952,7 +1053,8 @@ export class Game {
   grantXp(amount: number): void {
     const p = this.player;
     const ring = p.ringId ? RINGS[p.ringId] : null;
-    const gained = Math.round(amount * (ring?.xpMult ?? 1));
+    const rune = p.runeId ? RUNES[p.runeId] : null;
+    const gained = Math.round(amount * (ring?.xpMult ?? 1) * (rune?.xpMult ?? 1));
     p.xp += gained;
     let leveled = false;
     while (p.xp >= xpForNextLevel(p.lvl)) {
@@ -984,11 +1086,20 @@ export class Game {
     this.blood(e.x, e.y - 2, e.d.blood, e.boss ? 50 : 18);
     this.burst(e.x, e.y - 2, e.boss ? 48 : 10, [1.0, 0.7, 0.28], 12, "*'.", { e: 1 });
 
-    const emberGain = Math.round(e.minion ? e.d.embers * 0.3 : e.d.embers);
-    const xpGain = Math.round(e.minion ? e.d.xp * 0.3 : e.d.xp);
+    const rune = p.runeId ? RUNES[p.runeId] : null;
+    const eliteMult = e.eliteAffix ? 1.8 : 1.0;
+    const emberGain = Math.round((e.minion ? e.d.embers * 0.3 : e.d.embers) * eliteMult * (rune?.emberMult ?? 1));
+    const xpGain = Math.round((e.minion ? e.d.xp * 0.3 : e.d.xp) * eliteMult);
     p.embers += emberGain;
     this.grantXp(xpGain);
     this.floater(e.x, e.y - 5.5, `+${emberGain} Glut · +${xpGain} XP`, '#ffc970', 1.4);
+
+    if (e.isCryptGuardian) {
+      this.flags.dungeonsCleared++;
+      this.audio.chime();
+      this.ui?.banner('KRYPTA GESÄUBERT', 'Der Elite-Wächter ist gefallen! Plündere die Schatztruhe.', 'gold', 4.5);
+      this.save();
+    }
 
     if (e.boss) {
       this.flags.bosses.add(e.type);
@@ -1564,7 +1675,16 @@ export class Game {
     const key = `${cx},${cy}`;
     for (const f of c.feats) {
       if (f.kind === 'spawn') {
-        if (!this.killed.has(f.id)) this.enemies.push(this.createEnemy(f.enemy || 'ghoul', f.x + 0.5, f.y + 0.5, f.id, key));
+        if (!this.killed.has(f.id)) {
+          const en = this.createEnemy(f.enemy || 'ghoul', f.x + 0.5, f.y + 0.5, f.id, key);
+          if (f.name === 'dungeon_guardian') {
+            en.isCryptGuardian = true;
+            this.applyEliteAffix(en, pick(['burning', 'armored', 'swift', 'bloodthirsty']));
+          } else if (this.inDungeon && hash(f.x, f.y, 41) < 0.35) {
+            this.applyEliteAffix(en, pick(['burning', 'armored', 'swift', 'bloodthirsty']));
+          }
+          this.enemies.push(en);
+        }
       } else if (f.kind === 'boss') {
         if (f.boss && !this.flags.bosses.has(f.boss) && !this.enemies.some((e) => e.type === f.boss)) {
           this.enemies.push(this.createEnemy(f.boss, f.x + 0.5, f.y + 0.5, f.id, key));
@@ -1676,7 +1796,7 @@ export class Game {
       case 'chest':
         return { kind: 'chest', f: best, label: 'Truhe öffnen' };
       case 'cave':
-        return { kind: 'cave', f: best, label: 'Höhle durchsuchen' };
+        return { kind: 'cave', f: best, label: this.inDungeon ? 'Krypta verlassen (Oberwelt)' : 'Krypta betreten (2.5D-Dungeon)' };
       default:
         return { kind: 'gate', f: best, label: 'Das Siegeltor berühren' };
     }
@@ -1734,15 +1854,11 @@ export class Game {
       this.floater(it.f.x + 0.5, it.f.y - 3, `+${reward} Glut`, '#ffd56a', 1.5, true);
       this.save();
     } else if (it.kind === 'cave' && it.f) {
-      if (!this.flags.chests.has(it.f.id)) {
-        this.flags.chests.add(it.f.id);
-        this.player.embers += 220;
-        this.grantXp(90);
-        this.audio.chime();
-        this.ui.dialog('Schattenhöhle', ['Du steigst in die feuchte Kluft hinab und birgst alte Glutreste (+220 Glut, +90 XP).']);
-        this.save();
+      if (this.inDungeon) {
+        this.exitDungeon();
       } else {
-        this.ui.dialog('Schattenhöhle', ['Die Höhle wurde bereits geplündert. Nur kaltes Tropfen hallt darin.']);
+        const seed = Math.abs((it.f.x * 73856093) ^ (it.f.y * 19349663)) % 100000;
+        this.enterDungeon(it.f.id, 'Krypta der Glut', seed);
       }
     } else if (it.kind === 'gate') {
       if (this.sigils() >= 3) {
@@ -2300,7 +2416,20 @@ export class Game {
     }
   }
 
+  private applyEliteAffix(e: EnemyEntity, affixId: EliteAffixId): void {
+    const a = ELITE_AFFIXES[affixId];
+    e.eliteAffix = affixId;
+    e.maxHp = Math.round(e.maxHp * a.hpMult);
+    e.hp = e.maxHp;
+    e.maxPoise = Math.round(e.maxPoise * a.poiseMult);
+    e.poise = e.maxPoise;
+  }
+
   private updateRain(dt: number): void {
+    if (this.inDungeon) {
+      this.rain.length = 0;
+      return;
+    }
     const w = this.weather;
     const ashy = this.biome === BIOMES.ash;
     const want = Math.floor((ashy ? Math.max(0.35, w.rain * 0.6) : w.rain) * 140 * this.options.particlesDensity);
@@ -2461,9 +2590,11 @@ export class Game {
       weaponUpgrade: p.weaponUpgrade,
       armorId: p.armorId,
       ringId: p.ringId,
+      runeId: p.runeId,
       inventoryWeapons: [...p.inventoryWeapons],
       inventoryArmors: [...p.inventoryArmors],
       inventoryRings: [...p.inventoryRings],
+      inventoryRunes: [...p.inventoryRunes],
       unlockedSkills: [...p.unlockedSkills],
     };
     return {
@@ -2480,6 +2611,8 @@ export class Game {
       bestiary: { ...this.bestiary },
       knownLandmarks: [...this.flags.knownLandmarks],
       mapPins: [...this.mapPins],
+      claimedSideQuests: [...this.flags.claimedSideQuests],
+      dungeonsCleared: this.flags.dungeonsCleared,
       gateOpen: this.flags.gateOpen,
       victory: this.flags.victory,
       lost: this.lost,
@@ -2534,7 +2667,9 @@ export class Game {
     this.flags.bosses = new Set(data.bosses || []);
     this.flags.lore = new Set(data.lore || []);
     this.flags.chests = new Set(data.chests || []);
-    this.flags.knownLandmarks = new Set(data.knownLandmarks || ['start']);
+    this.flags.knownLandmarks = new Set(data.knownLandmarks || ['start', 'crypt_start']);
+    this.flags.claimedSideQuests = new Set(data.claimedSideQuests || []);
+    this.flags.dungeonsCleared = data.dungeonsCleared || 0;
     this.flags.gateOpen = !!data.gateOpen;
     this.flags.victory = !!data.victory;
     this.flags.talkedMaren = !!data.talkedMaren;
@@ -2563,12 +2698,17 @@ export class Game {
   newGame(slot = 1): void {
     this.activeSlot = slot;
     this.player = this.createPlayer();
+    this.world = this.overworld;
+    this.inDungeon = false;
+    this.activeDungeon = null;
     this.flags = {
       shrines: new Set(),
       bosses: new Set(),
       lore: new Set(),
       chests: new Set(),
-      knownLandmarks: new Set(['start']),
+      knownLandmarks: new Set(['start', 'crypt_start']),
+      claimedSideQuests: new Set(),
+      dungeonsCleared: 0,
       gateOpen: false,
       victory: false,
       talkedMaren: false,

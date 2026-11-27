@@ -87,9 +87,11 @@ export interface SerializablePlayer {
   weaponUpgrade: number;
   armorId: string;
   ringId: string | null;
+  runeId?: string | null;
   inventoryWeapons: string[];
   inventoryArmors: string[];
   inventoryRings: string[];
+  inventoryRunes?: string[];
   unlockedSkills: SkillId[];
 }
 
@@ -107,6 +109,8 @@ export interface SaveSlotData {
   bestiary: Record<string, number>;
   knownLandmarks: string[];
   mapPins: { x: number; y: number; label: string }[];
+  claimedSideQuests?: string[];
+  dungeonsCleared?: number;
   gateOpen: boolean;
   victory: boolean;
   lost: { x: number; y: number; amount: number } | null;

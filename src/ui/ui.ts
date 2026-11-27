@@ -3,6 +3,7 @@ import { ASP, clamp, TAU } from '../engine/util.ts';
 import { ENEMY_DEFS, type Game, type GameUICallbacks } from '../game/game.ts';
 import { buildPlayerPortraitAscii } from '../game/pixelSprites.ts';
 import { ARMORS, RINGS, SKILLS, WEAPONS, weaponUpgradeCost, xpForNextLevel } from '../game/rpg.ts';
+import { RUNES, type RuneId } from '../game/sideQuests.ts';
 import type { SkillId } from '../game/types.ts';
 import type { MultiplayerClient } from '../net/client.ts';
 import type { SceneRenderer } from '../render/renderer.ts';
@@ -473,6 +474,12 @@ export class GameUI implements GameUICallbacks {
           action: () => this.travelMenu(f),
         },
         {
+          label: 'Glut-Prüfung (Boss-Rematch)',
+          sub: G.flags.bosses.size > 0 ? 'Verstärkter Bosskampf für Bonus-Beute' : 'Erst nach erstem Boss-Sieg',
+          disabled: G.flags.bosses.size === 0,
+          action: () => this.rematchMenu(f),
+        },
+        {
           label: 'Spielstand speichern',
           sub: `Slot ${G.activeSlot}`,
           action: () => {
@@ -512,6 +519,20 @@ export class GameUI implements GameUICallbacks {
       () => this.shrineMenu(f),
       `Verfügbare Attributpunkte: ${p.attrPoints}`,
     );
+  }
+
+  private rematchMenu(f: WorldFeature): void {
+    const G = this.G;
+    const items: MenuItem[] = Array.from(G.flags.bosses).map((b) => ({
+      label: `${ENEMY_DEFS[b]?.name || b} (Glut-Prüfung)`,
+      sub: '+35% LP · Brennend · Bonus-XP & Glut',
+      action: () => {
+        this.closeAll();
+        G.startBossRematch(b);
+      },
+    }));
+    items.push({ label: 'Zurück', action: () => this.shrineMenu(f) });
+    this.menu('Glut-Prüfung', items, () => this.shrineMenu(f), 'Fordere gefallene Wächter erneut heraus.');
   }
 
   private travelMenu(f: WorldFeature): void {
@@ -798,9 +819,28 @@ export class GameUI implements GameUICallbacks {
     }
     if (this.open) return;
     this.open = 'journal';
+    this.renderJournal();
+    this.el.journal.classList.remove('hidden');
+  }
+
+  private renderJournal(): void {
     const G = this.G;
     const stepsHtml = G.quest.allSteps
       .map((s) => `<div class="jrow ${s.done ? 'done' : ''}"><span>${s.done ? '✓' : '◆'} ${s.title}</span><small>${s.detail}</small></div>`)
+      .join('');
+    const sideHtml = G.getSideQuests()
+      .map((sq) => {
+        const reward = sq.def.rewardRune ? ` · ${RUNES[sq.def.rewardRune].name}` : '';
+        const btn =
+          sq.completed && !sq.claimed
+            ? `<button class="ibtn sqClaim" data-sq="${sq.def.id}">Belohnung einfordern (+${sq.def.rewardEmbers} Glut${reward})</button>`
+            : '';
+        return `<div class="jrow ${sq.claimed ? 'done' : ''}">
+          <span>${sq.claimed ? '✓' : sq.completed ? '★' : '◇'} ${sq.def.title} (${sq.progress}/${sq.def.goal})</span>
+          <small>${sq.def.desc}</small>
+          ${btn}
+        </div>`;
+      })
       .join('');
     const bestHtml =
       Object.entries(G.bestiary)
@@ -812,10 +852,15 @@ export class GameUI implements GameUICallbacks {
 
     this.el.journalBody.innerHTML = `
       <div class="jsec"><h3>Hauptquest</h3>${stepsHtml}</div>
+      <div class="jsec"><h3>Nebenaufträge &amp; Kopfgelder</h3>${sideHtml}</div>
       <div class="jsec"><h3>Bestiarium</h3>${bestHtml}</div>
       <div class="jsec"><h3>Gefundene Stelen</h3>${loreHtml}</div>
     `;
-    this.el.journal.classList.remove('hidden');
+    for (const btn of Array.from(this.el.journalBody.querySelectorAll('.sqClaim')) as HTMLButtonElement[]) {
+      btn.onclick = () => {
+        if (G.claimSideQuest(btn.dataset.sq!)) this.renderJournal();
+      };
+    }
   }
 
   // ------------------------------------------------------------ Inventory (I)
@@ -890,6 +935,9 @@ export class GameUI implements GameUICallbacks {
       p.hp = Math.min(G.maxHp(), p.hp);
       p.mp = Math.min(G.maxMp(), p.mp);
       p.st = Math.min(G.maxSt(), p.st);
+    });
+    addEquipSection('Runen (aus Nebenaufträgen)', p.inventoryRunes, p.runeId, RUNES, (id) => {
+      p.runeId = id as RuneId;
     });
   }
 
