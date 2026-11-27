@@ -49,10 +49,17 @@ export function clearOneShotInputs(inp: InputState): void {
   inp.skillSlot = 0;
 }
 
-export function pollGamepad(inp: InputState): void {
+export function sampleTickInput(source: InputState, inp: InputState): void {
+  Object.assign(inp, source);
   if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
-  const pads = navigator.getGamepads();
-  const gp = pads && pads[0];
+  let gp: Gamepad | null;
+  try {
+    gp = navigator.getGamepads()[0];
+  } catch (error) {
+    // Embedded games can receive a SecurityError from the host's permissions policy.
+    if (error instanceof DOMException && error.name === 'SecurityError') return;
+    throw error;
+  }
   if (!gp) return;
   const dead = 0.25;
   const lx = Math.abs(gp.axes[0] || 0) > dead ? gp.axes[0] : 0;
