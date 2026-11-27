@@ -1,8 +1,10 @@
 import './style.css';
 import { AudioEngine } from './engine/audio.ts';
-import { clearOneShotInputs, createInputState, pollGamepad } from './engine/input.ts';
+import { clearOneShotInputs, createInputState, sampleTickInput } from './engine/input.ts';
 import { loadOptions, ZOOM_PX } from './engine/options.ts';
 import { Game } from './game/game.ts';
+import { knightAnimationFrame } from './game/knight.ts';
+import { WEAPONS } from './game/rpg.ts';
 import type { AnimPose } from './game/pixelSprites.ts';
 import { MultiplayerClient } from './net/client.ts';
 import { SceneRenderer } from './render/renderer.ts';
@@ -38,6 +40,7 @@ function boot(): void {
   const renderer = new SceneRenderer(screenCv, overlayCv, ZOOM_PX[options.zoom]);
 
   const inp = createInputState();
+  const tickInput = createInputState();
   const touchRoot = document.getElementById('touchControls') as HTMLElement;
   const touch = new TouchController(touchRoot, inp, {
     onInteract: () => {
@@ -309,8 +312,8 @@ function boot(): void {
     let steps = 0;
     while (accum >= FIXED_DT && steps < 4) {
       if (!ui.open || game.mode === 'title') {
-        pollGamepad(inp);
-        game.update(FIXED_DT, inp, objs);
+        sampleTickInput(inp, tickInput);
+        game.update(FIXED_DT, tickInput, objs);
       }
       clearOneShotInputs(inp);
       accum -= FIXED_DT;
@@ -326,7 +329,8 @@ function boot(): void {
       else if (p.drink > 0) pose = 'drink';
       else if (p.atk > 0.04) pose = p.combo === 0 ? 'attack1' : p.combo === 1 ? 'attack2' : 'attack3';
       else if (p.moving) pose = 'walk';
-      const fr = pose === 'walk' ? Math.floor(p.walkT * 9) % 6 : Math.floor(game.t * 2.5) % 2;
+      const weapon = WEAPONS[p.weaponId] || WEAPONS.iron_sword;
+      const fr = knightAnimationFrame(pose, game.t, p.walkT, p.atk, weapon.speed * 0.9, p.roll);
 
       net.update(frameDt, {
         x: p.x,

@@ -1,8 +1,11 @@
+import { buildKnightSprite, knightAnimationFrame } from '../game/knight.ts';
+import { buildEnemySprite } from '../game/creatures.ts';
+import { SHADED_TILE, FINE_STROKE, STROKE_AXES, GRASS_TUFT, STONE_FACE, WATER_LINE } from '../engine/atlas.ts';
 import { TextOverlay, type OverlayArrow, type OverlayBar, type OverlayLabel } from '../engine/textOverlay.ts';
 import { ASP, clamp, hash, lerp, noise, TAU } from '../engine/util.ts';
 import { WebGLAsciiRenderer } from '../engine/webgl.ts';
 import type { EnemyEntity, Game, NpcEntity } from '../game/game.ts';
-import { buildCreatureSprite, buildKnightSprite, buildPropSprite, type AnimPose, type PixelSprite } from '../game/pixelSprites.ts';
+import { buildCreatureSprite, buildPropSprite, type AnimPose, type PixelSprite } from '../game/pixelSprites.ts';
 import { ARMORS, WEAPONS } from '../game/rpg.ts';
 import { ELITE_AFFIXES } from '../game/sideQuests.ts';
 import type { RemotePlayerEntity } from '../net/client.ts';
@@ -12,16 +15,39 @@ import { T, WATERY, type TerrainId, type WorldObject } from '../world/types.ts';
 export const WORLD_SCALE_X = 4;
 export const WORLD_SCALE_Y = 2;
 
-// Full 58-character luminance-ordered typographic density ramps (exact "Senje" intricate masonry/bark/metal texture!)
-const RAMP_STONE = '.,:;!i><~+-?][}{)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
-const RAMP_METAL = '.,:;-=+*!?/|)(1jrxvczLJY0OQPDBKHM#%&8W@$';
-const RAMP_CLOTH = '.,:\'`^";!i~+_-?/|)(rxuvczmwqpdbkhao*#MW&8%B@';
-const RAMP_BARK = '.,:;!|/tfjrxnuvzqpdbkhaoO0Q8#MW&%B@$';
+// Sparse marks let light and larger material shapes carry the terrain.
+const RAMP_STONE = '.,:;-~=+#';
+const RAMP_METAL = '.:-/=+#';
+const RAMP_CLOTH = ".,'`:/|";
+const RAMP_BARK = ".'/:|}#";
 const RAMP_FOLIAGE = '.,\'"`^/\\|/\\|;vV*#';
 
 function pickRampChar(ramp: string, lum: number, variation = 0): number {
   const idx = clamp(Math.floor((lum + variation) * (ramp.length - 1)), 0, ramp.length - 1);
   return ramp.charCodeAt(idx);
+}
+
+function luminousStroke(spr: PixelSprite, x: number, y: number, flip: boolean): number {
+  let best = FINE_STROKE + 12;
+  let bestScore = 0;
+  for (let axis = 0; axis < STROKE_AXES.length; axis++) {
+    const [screenDx, dy] = STROKE_AXES[axis];
+    const dx = flip ? -screenDx : screenDx;
+    let ends = 0;
+    let score = 0;
+    for (const sign of [-1, 1]) {
+      const nx = x + sign * dx;
+      const ny = y + sign * dy;
+      if (nx < 0 || ny < 0 || nx >= spr.w || ny >= spr.h || spr.mat[ny * spr.w + nx] !== 3) continue;
+      ends |= sign < 0 ? 1 : 2;
+      score++;
+    }
+    if (score > bestScore) {
+      best = FINE_STROKE + axis * 3 + ends - 1;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 interface TerrainStyle {
@@ -33,6 +59,13 @@ interface TerrainStyle {
   masonry?: boolean;
   organic?: boolean;
 }
+
+const FLOWER_COLORS: [number, number, number][] = [
+  [0.96, 0.96, 0.9], // pale white
+  [0.72, 0.94, 1.0], // moon cyan
+  [0.82, 0.74, 1.0], // dusk violet
+  [1.0, 0.88, 0.55], // ember yellow
+];
 
 const TS: Record<number, TerrainStyle> = {
   [T.DEEP]: { c: [0.16, 0.24, 0.36], bgK: 0.04, water: true, organic: true },
@@ -68,6 +101,9 @@ export class SceneRenderer {
   private CHR!: Int32Array;
   private MAT!: Uint8Array;
   private ELEV!: Uint8Array;
+  private SHS!: Uint32Array; // per-sprite stamp so a cast shadow darkens each cell once
+  private shadowStamp = 0;
+  private castShadows = true;
   private FL!: Uint8Array; // bit 1 = water, bit 2 = prop/entity, bit 4 = facade, bit 8 = entity, bit 16 = grass
   private BR!: Float32Array;
   private BG!: Float32Array;
@@ -114,6 +150,7 @@ export class SceneRenderer {
     this.MAT = new Uint8Array(n);
     this.ELEV = new Uint8Array(n);
     this.FL = new Uint8Array(n);
+    this.SHS = new Uint32Array(n);
     this.BR = new Float32Array(n);
     this.BG = new Float32Array(n);
     this.BB = new Float32Array(n);
@@ -203,7 +240,7 @@ export class SceneRenderer {
     const rows = this.gl.gridRows;
     const cx = Math.round(wx * WORLD_SCALE_X) - this.camCellX;
     const cy = Math.round(wy * WORLD_SCALE_Y) - this.camCellY + (opts.liftCells ?? 0);
-    const sx0 = cx - spr.ax;
+    const sx0 = cx - (opts.flip && spr.detail ? spr.w - 1 - spr.ax : spr.ax);
     const sy0 = cy - spr.ay;
     if (sx0 > cols + 6 || sy0 > rows + 6 || sx0 + spr.w < -6 || sy0 + spr.h < -6) return;
 
@@ -214,8 +251,8 @@ export class SceneRenderer {
     const swayX = opts.swayX ?? 0;
 
     // 1. Soft dark ground shadow under sprite
-    const shRx = Math.max(3, Math.round(spr.w * 0.36));
-    const shRy = Math.max(1, Math.round(spr.w * 0.13));
+    const shRx = Math.max(3, spr.detail ? 5 : Math.round(spr.w * 0.36));
+    const shRy = Math.max(1, spr.detail ? 2 : Math.round(spr.w * 0.13));
     for (let dy = -shRy; dy <= shRy; dy++) {
       for (let dx = -shRx; dx <= shRx; dx++) {
         const d2 = (dx * dx) / (shRx * shRx) + (dy * dy) / (shRy * shRy);
@@ -233,6 +270,36 @@ export class SceneRenderer {
       }
     }
 
+    // 1b. Moon-cast shadow: project every sprite cell onto the ground plane, away from
+    // the moon in the upper left, so figures and trees stand on the terrain instead of on it.
+    if (this.castShadows && alpha > 0.5) {
+      const stamp = ++this.shadowStamp;
+      const fade = alpha * (spr.detail ? 0.62 : 0.55);
+      for (let j = 0; j < spr.h; j++) {
+        const hA = spr.ay - j;
+        if (hA < 1) continue;
+        const offX = Math.round(hA * 0.55);
+        const offY = Math.round(hA * 0.16);
+        const k = 1 - fade * (1 - (hA / Math.max(1, spr.ay)) * 0.45);
+        for (let i = 0; i < spr.w; i++) {
+          if (!spr.a[j * spr.w + i]) continue;
+          const dx = flip ? spr.w - 1 - i : i;
+          const gx = sx0 + dx + offX;
+          const gy = cy + offY;
+          if (gx < 0 || gy < 0 || gx >= cols || gy >= rows) continue;
+          const idx = gy * cols + gx;
+          if (this.SHS[idx] === stamp || this.FL[idx] & (4 | 8)) continue;
+          this.SHS[idx] = stamp;
+          this.BR[idx] *= k;
+          this.BG[idx] *= k;
+          this.BB[idx] *= k;
+          this.BGR[idx] *= k;
+          this.BGG[idx] *= k;
+          this.BGB[idx] *= k;
+        }
+      }
+    }
+
     // 2. Render sprite into dense typographic ASCII
     for (let j = 0; j < spr.h; j++) {
       const topWeight = 1 - j / Math.max(1, spr.h - 1);
@@ -244,6 +311,26 @@ export class SceneRenderer {
         const gx = sx0 + dx + rowSway;
         const gy = sy0 + j;
         if (gx < 0 || gy < 0 || gx >= cols || gy >= rows) continue;
+
+        if (spr.detail) {
+          const idx = gy * cols + gx;
+          const detail = spr.detail;
+          const bits = detail.mask[si];
+          const mask = flip ? ((bits & 21) << 1) | ((bits & 42) >> 1) : bits;
+          const edge = detail.cutout[si];
+          const accent = edge && rim ? 0.12 : 0;
+          const r = flash ? 1 : lerp(spr.r[si], rim?.[0] ?? 0, accent);
+          const g = flash ? 0.96 : lerp(spr.g[si], rim?.[1] ?? 0, accent);
+          const b = flash ? 0.9 : lerp(spr.b[si], rim?.[2] ?? 0, accent);
+          const underR = this.BGR[idx], underG = this.BGG[idx], underB = this.BGB[idx];
+          this.putCell(gx, gy, SHADED_TILE + mask, r, g, b, flash ? 0.8 : spr.em[si], alpha);
+          const ink = si * 3;
+          this.BGR[idx] = edge ? underR : lerp(underR, flash ? 0.7 : detail.ground[ink], alpha);
+          this.BGG[idx] = edge ? underG : lerp(underG, flash ? 0.6 : detail.ground[ink + 1], alpha);
+          this.BGB[idx] = edge ? underB : lerp(underB, flash ? 0.6 : detail.ground[ink + 2], alpha);
+          this.FL[idx] |= 8;
+          continue;
+        }
 
         const leftEmpty = i === 0 || !spr.a[si - 1];
         const rightEmpty = i === spr.w - 1 || !spr.a[si + 1];
@@ -286,15 +373,27 @@ export class SceneRenderer {
           em = Math.max(em, 0.22);
         }
 
+        // Volume: occlusion where the form meets the ground, key light from the left.
+        if (!flash) {
+          const hA = spr.ay - j;
+          const side = (dx - (spr.w - 1) * 0.5) / Math.max(1, spr.w * 0.5);
+          const vol = (0.64 + 0.36 * Math.min(1, Math.max(0, hA) / 5)) * (1 - side * 0.16);
+          r *= vol;
+          g *= vol;
+          b *= vol;
+        }
+
         const lum = clamp(r * 0.3 + g * 0.59 + b * 0.11, 0.08, 1);
         const mat = spr.mat[si];
-        const micro = (hash(i + Math.floor(wx * 7), j + Math.floor(wy * 7), 47) - 0.5) * 0.09;
+        const micro = (hash(i, j, 47) - 0.5) * 0.09;
         let code: number;
-        if (mat === 3) {
+        if (mat === 3 && opts.isEntity) {
+          code = luminousStroke(spr, i, j, flip);
+        } else if (mat === 3) {
           code = lum > 0.8 ? 64 : lum > 0.55 ? 42 : 43; // @ * +
         } else if (mat === 4) {
-          // Feathery directional foliage blades (/|\'")
-          code = pickRampChar(RAMP_FOLIAGE, lum, micro * 1.4);
+          const lean = dx < spr.ax - 1 ? 0 : dx > spr.ax + 1 ? 2 : 1;
+          code = GRASS_TUFT + lean * 4 + (Math.floor((micro / 0.09 + 0.5) * 4) & 3);
         } else if (mat === 5) {
           code = pickRampChar(RAMP_BARK, lum, micro * 1.2);
         } else if (mat === 2) {
@@ -307,7 +406,7 @@ export class SceneRenderer {
 
         const idx = gy * cols + gx;
         // Slightly fuller dark background inside solid figure torso for clean silhouette readability
-        const bgK = opts.isEntity ? 0.22 : mat === 5 || mat === 2 ? 0.1 : 0.04;
+        const bgK = mat === 3 ? 0.10 : opts.isEntity ? 0.43 : mat === 4 ? 0.19 : 0.28;
         this.putCell(gx, gy, code, r, g, b, em, alpha, bgK);
         if (opts.isEntity) this.FL[idx] |= 8;
       }
@@ -454,7 +553,7 @@ export class SceneRenderer {
           g *= darkK * (0.88 + ripple * 0.25);
           b *= darkK * (0.98 + ripple * 0.28);
           if (ripple > 0.35 && hv > 0.45) {
-            code = ripple > 0.65 ? 126 : 45; // ~ -
+            code = WATER_LINE + Math.floor(hv * 4);
           } else {
             code = hv > 0.78 ? 46 : 32; // sparse delicate dots over obsidian void
           }
@@ -464,7 +563,9 @@ export class SceneRenderer {
             r = 0.56;
             g = 0.66;
             b = 0.74;
-            code = ripple > 0 ? 126 : 45;
+            code = WATER_LINE + Math.floor(detail * 3.99);
+            const foam = 0.45 + detail * 0.45 + ripple * 0.16;
+            r *= foam; g *= foam; b *= foam;
           }
         } else if (tp === T.ROAD || tp === T.FLOOR || tp === T.ARCH) {
           // Intricate weathered cobblestone / flagstone mapped through full 58-char stone ramp!
@@ -476,7 +577,7 @@ export class SceneRenderer {
           r *= stoneShade;
           g *= stoneShade;
           b *= stoneShade * 1.04;
-          code = pickRampChar(RAMP_STONE, clamp(stoneShade * 0.72, 0.1, 0.92), (hv - 0.5) * 0.14);
+          code = isMortarV ? 58 : isMortarH ? 45 : hv < 0.22 ? 44 : 32;
         } else if (tp === T.STAIRS) {
           code = subY === 0 ? 61 : 45;
           const stepShade = subY === 0 ? 1.12 : 0.78;
@@ -495,11 +596,14 @@ export class SceneRenderer {
           code = (cellX & 1) ? 72 : 124;
         } else if (st.stone) {
           // Weathered rock & cliffs using full alphanumeric stone density ramp!
-          const rockL = clamp(0.35 + broad * 0.4 + detail * 0.25, 0.12, 0.95);
+          // Long slate planes crossed by a few pale mineral seams.
+          const band = Math.abs(((cellY * 0.19 + cellX * 0.038 + broad * 2.1) % 1 + 1) % 1 - 0.5);
+          const seam = band < 0.055 && detail > 0.36;
+          const rockL = 0.26 + broad * 0.34 + detail * 0.19 + (seam ? 0.20 : 0);
           r *= rockL * 1.1;
           g *= rockL * 1.12;
           b *= rockL * 1.18;
-          code = pickRampChar(RAMP_STONE, rockL, (hv - 0.5) * 0.15);
+          code = seam ? 45 : hv < 0.22 + detail * 0.17 ? 183 : 32;
         } else if (st.grass) {
           // Deep shadowed forest bed beneath lush multi-layer grass blades
           r *= 0.48;
@@ -519,6 +623,25 @@ export class SceneRenderer {
           }
         }
 
+        // Terrace relief: raised ground catches more moonlight, its north lip and west
+        // flank glint, its east flank turns away, and the ground at a cliff foot sits in shadow.
+        if (!st.water) {
+          const subX = ((cellX % WORLD_SCALE_X) + WORLD_SCALE_X) % WORLD_SCALE_X;
+          let relief = 0.88 + Math.min(el, 4) * 0.06;
+          if (subY === 0) {
+            const northEl = W.elevAt(baseWx, baseWy - 1);
+            if (northEl < el) relief *= 1.22;
+            else if (northEl > el) relief *= 0.58;
+            // Front lip right above a cliff face catches the moon.
+            if (W.elevAt(baseWx, baseWy + 1) < el) relief *= 1.28;
+          }
+          if (subX === 0 && W.elevAt(baseWx - 1, baseWy) < el) relief *= 1.12;
+          if (subX === WORLD_SCALE_X - 1 && W.elevAt(baseWx + 1, baseWy) < el) relief *= 0.74;
+          r *= relief;
+          g *= relief;
+          b *= relief;
+        }
+
         this.CHR[i] = code;
         this.MAT[i] = tp;
         this.ELEV[i] = el;
@@ -526,9 +649,10 @@ export class SceneRenderer {
         this.BR[i] = r;
         this.BG[i] = g;
         this.BB[i] = b;
-        this.BGR[i] = r * st.bgK;
-        this.BGG[i] = g * st.bgK;
-        this.BGB[i] = b * st.bgK;
+        const groundFill = st.grass ? 0.55 : st.masonry ? 0.24 : st.water ? 0.30 : st.stone ? 0.43 : st.bgK;
+        this.BGR[i] = r * groundFill;
+        this.BGG[i] = g * groundFill;
+        this.BGB[i] = b * groundFill;
         this.EM[i] = 0;
         this.HV[i] = hv;
       }
@@ -566,13 +690,23 @@ export class SceneRenderer {
 
         const isMerlon = (Math.floor(cellX / 4) & 1) === 0;
         const topH = isMerlon ? facadeH + 2 : facadeH;
-        const subX = ((cellX % WORLD_SCALE_X) + WORLD_SCALE_X) % WORLD_SCALE_X;
 
+
+        // Adjacent arch tiles form one vaulted opening. Sample the run once per column.
+        let archClear = 0;
+        let archDepth = 0;
+        if (isArch) {
+          let left = wx, right = wx;
+          while (W.typeAt(left - 1, wy) === T.ARCH) left--;
+          while (W.typeAt(right + 1, wy) === T.ARCH) right++;
+          const halfWidth = (right - left + 1) * WORLD_SCALE_X / 2;
+          const u = (cellX + 0.5 - left * WORLD_SCALE_X) / halfWidth - 1;
+          archDepth = Math.sqrt(Math.max(0, 1 - u * u));
+          archClear = Math.round(6 + 7 * archDepth);
+        }
+        const pierX = ((cellX % 27) + 27) % 27;
         for (let fh = 1; fh <= topH; fh++) {
-          if (isArch) {
-            const archClear = subX === 0 || subX === WORLD_SCALE_X - 1 ? 9 : 11;
-            if (fh <= archClear) continue;
-          }
+          if (isArch && fh <= archClear) continue;
           const fy = y - fh;
           if (fy < 0 || fy >= rows) continue;
 
@@ -582,18 +716,26 @@ export class SceneRenderer {
             if (od < 15) occAlpha = 0.24;
           }
 
-          const brickRow = Math.floor(fh / 2);
+          const brickRow = Math.floor(fh / 3);
           const stagger = (brickRow & 1) * 4;
           const isMortarV = ((cellX + stagger) % 7 + 7) % 7 === 0;
-          const isMortarH = (fh % 2) === 0;
+          const isMortarH = (fh % 3) === 0;
           const topCap = fh >= topH - 1;
-          const isArchRim = isArch && fh === (subX === 0 || subX === WORLD_SCALE_X - 1 ? 10 : 12);
+          const isArchRim = isArch && fh <= archClear + 2;
 
           // Rich weathered stone heightfield (multi-octave fBM + mortar grooves + vertical AO)
-          const ao = 0.52 + 0.52 * (fh / topH);
+          const pierLight = isArch ? 0.92 + archDepth * 0.12 : pierX < 3 ? 1.20 : pierX < 5 ? 0.59 : 0.96;
+          // Battlements as blocks: merlons have a lit west face, a shaded east face and
+          // a bright top; the crenel floor between them sits in the merlons' shadow.
+          const mx = ((cellX % 4) + 4) % 4;
+          let blockK = 1;
+          if (fh > facadeH) blockK = mx === 0 ? 1.22 : mx === 3 ? 0.66 : 1;
+          if (isMerlon && fh === topH) blockK *= 1.14;
+          if (!isMerlon && fh >= topH - 1) blockK *= mx === 0 ? 0.62 : 0.78;
+          const ao = (0.46 + 0.58 * (fh / topH)) * pierLight * blockK;
           const weatherN = noise(cellX * 0.12, (cellY - fh) * 0.14, 71);
           const crackN = noise(cellX * 0.32, (cellY - fh) * 0.32, 97);
-          const blockTint = 0.82 + noise(Math.floor((cellX + stagger) / 7) * 0.9, brickRow * 0.9, 53) * 0.34;
+          const blockTint = 0.75 + hash(Math.floor((cellX + stagger) / 7), cellY - brickRow * 3, 53) * 0.46;
           const mortarK = (isMortarV || isMortarH) && !topCap && !isArchRim ? 0.58 : 1.0;
 
           // Creeping organic moss & ivy patches draping over castle walls & towers (exact Image 2 & 4 look!)
@@ -607,7 +749,7 @@ export class SceneRenderer {
           if (isMoss) {
             const ml = clamp(0.45 + (mossField - 0.68) * 2.2, 0.35, 1.0);
             r = lerp(0.12, 0.28, ml) * ao;
-            g = lerp(0.36, 0.66, ml) * ao;
+            g = lerp(0.24, 0.48, ml) * ao;
             b = lerp(0.14, 0.24, ml) * ao;
             ch = pickRampChar(RAMP_FOLIAGE, ml, (crackN - 0.5) * 0.25);
           } else {
@@ -623,10 +765,16 @@ export class SceneRenderer {
               g = 0.56;
               b = 0.24;
             }
-            ch = pickRampChar(RAMP_STONE, lum, (crackN - 0.5) * 0.16);
+            const grain = hash(cellX, cellY - fh, 103);
+            if ((isMortarV || isMortarH) && !topCap && !isArchRim) {
+              ch = isMortarV ? 58 : grain > 0.65 ? 45 : 46;
+            } else {
+              const band = clamp(Math.floor(lum * 4 + grain * 0.45), 0, 3);
+              ch = STONE_FACE + band * 4 + Math.floor(grain * 4);
+            }
           }
 
-          this.putCell(x, fy, ch, r, g, b, 0, occAlpha, 0.09);
+          this.putCell(x, fy, ch, r, g, b, 0, occAlpha, isMoss ? 0.28 : 0.42);
           this.FL[fy * cols + x] |= 4;
         }
       }
@@ -640,17 +788,16 @@ export class SceneRenderer {
     for (const n of G.npcs) grassEntities.push({ x: n.x, y: n.y });
     for (const rp of remotePlayers) grassEntities.push({ x: rp.x, y: rp.y });
 
-    const grassStep = G.options.grassDensity >= 0.9 ? 1 : 2;
-    for (let y = 3; y < rows; y += grassStep) {
+    for (let y = 0; y < rows; y++) {
       const cellY = this.camCellY + y;
       const wy = cellY / WORLD_SCALE_Y;
-      for (let x = 0; x < cols; x += grassStep) {
+      for (let x = 0; x < cols; x++) {
         const i = y * cols + x;
         if (!(this.FL[i] & 16)) continue;
         if (this.FL[i] & 4) continue;
         const hv = this.HV[i];
-        // Dense 88% lush coverage (no patchy holes!)
         if (hv > 0.88) continue;
+        if (G.options.grassDensity < 0.9 && hash(this.camCellX + x, cellY, 151) > 0.34) continue;
 
         const mat = this.MAT[i];
         const cellX = this.camCellX + x;
@@ -659,19 +806,24 @@ export class SceneRenderer {
           (noise(wx * 0.075 - t * (0.65 + G.weather.wind * 1.4), wy * 0.11 + t * 0.12, 5) - 0.48) * 1.75 +
           Math.sin(t * 1.8 + wx * 0.35 + wy * 0.2) * 0.25;
         const disp = G.grassField.sampleDisplacement(wx, wy, grassEntities);
-        const tilt = wind + disp;
+        const tilt = wind + disp + (hv - 0.44) * 0.85;
 
         // Sweeping hill tonal variation + moonlight sheen
         const hill = noise(wx * 0.06, wy * 0.08, 29);
         const patch = noise(wx * 0.2, wy * 0.25, 61);
         const tone = clamp(hill * 0.65 + patch * 0.35, 0, 1);
+        // Clumps: dense tussocks separated by darker hollows where the bed shows through.
+        const clump = noise(wx * 0.55 + hv * 0.3, wy * 0.7, 77);
+        if (clump < 0.3 && hv > 0.42) continue;
+        const clumpK = 0.72 + clump * 0.5;
+        const dry = mat !== T.FOREST && hash(cellX, cellY, 171) > 0.9;
 
-        const rBase = mat === T.MOOR ? lerp(0.28, 0.44, tone) : lerp(0.08, 0.24, tone);
-        const gBase = mat === T.MOOR ? lerp(0.32, 0.48, tone) : lerp(0.28, 0.68, tone);
-        const bBase = mat === T.MOOR ? lerp(0.14, 0.22, tone) : lerp(0.1, 0.25, tone);
+        const rBase = mat === T.MOOR ? lerp(0.28, 0.44, tone) : lerp(0.08, 0.30, tone);
+        const gBase = mat === T.MOOR ? lerp(0.32, 0.48, tone) : lerp(0.19, 0.51, tone);
+        const bBase = mat === T.MOOR ? lerp(0.14, 0.22, tone) : lerp(0.14, 0.36, tone);
 
         // Tall 3-4 cell layered feathery blades
-        const len = hv < 0.22 ? 4 : hv < 0.58 ? 3 : 2;
+        const len = 1 + Math.round(patch * 2 + hv) + (clump > 0.68 ? 1 : 0);
         for (let b = 0; b < len; b++) {
           const bx = x + Math.round(tilt * (b * 0.48));
           const by = y - b;
@@ -679,29 +831,34 @@ export class SceneRenderer {
           const bi = by * cols + bx;
           if (this.FL[bi] & 4) continue;
 
-          // Choose expressive blade stroke based on tilt & height
-          let ch: number;
-          if (b === len - 1 && Math.abs(tilt) < 0.25) ch = hv > 0.45 ? 39 : 44; // delicate tip ' ,
-          else if (tilt < -0.32) ch = 92; // \
-          else if (tilt > 0.32) ch = 47; // /
-          else ch = 124; // |
-
-          // Base blades darker, tips catch bright emerald/sage moonlight
-          const tipK = 0.55 + (b / Math.max(1, len - 1)) * 0.68;
-          this.CHR[bi] = ch;
-          this.BR[bi] = rBase * tipK;
-          this.BG[bi] = gBase * tipK;
-          this.BB[bi] = bBase * tipK;
+          const lean = tilt < -0.28 ? 0 : tilt > 0.28 ? 2 : 1;
+          const ch = GRASS_TUFT + lean * 4 + (Math.floor(hv * 23) & 3);
+          const tipK = (0.48 + b / Math.max(1, len - 1) * 0.76) * (0.74 + patch * 0.48 + hv * 0.24) * clumpK;
+          const isTip = b === len - 1;
+          this.CHR[bi] = dry && isTip ? 39 : ch;
+          if (dry && isTip) {
+            // Sun-bleached seed heads break up the green with a few straw tips.
+            this.BR[bi] = 0.58 * tipK;
+            this.BG[bi] = 0.54 * tipK;
+            this.BB[bi] = 0.34 * tipK;
+          } else {
+            this.BR[bi] = rBase * tipK;
+            this.BG[bi] = gBase * tipK;
+            this.BB[bi] = bBase * tipK;
+          }
         }
 
         // Delicate scattered glowing white & pale-cyan meadow pollen / wildflower specks (exact Images 1, 2, 3!)
-        if (hv > 0.855 && mat !== T.FOREST) {
-          const cyan = hash(cellX, cellY, 99) > 0.45;
-          this.CHR[i] = hv > 0.87 ? 42 : 183; // * or ·
-          this.BR[i] = cyan ? 0.72 : 0.96;
-          this.BG[i] = cyan ? 0.94 : 0.96;
-          this.BB[i] = cyan ? 1.0 : 0.9;
-          this.EM[i] = 0.65;
+        if (hv > 0.863 && patch > 0.54 && mat !== T.FOREST) {
+          // Each meadow patch blooms in one hue so flowers read as drifts, not confetti.
+          const hue = Math.floor(noise(wx * 0.09, wy * 0.11, 131) * 4) & 3;
+          const fc = FLOWER_COLORS[hue];
+          const bright = 0.7 + hash(cellX, cellY, 99) * 0.3;
+          this.CHR[i] = hv > 0.872 ? 42 : 183; // * or ·
+          this.BR[i] = fc[0] * bright;
+          this.BG[i] = fc[1] * bright;
+          this.BB[i] = fc[2] * bright;
+          this.EM[i] = 0.35 + bright * 0.3;
         }
       }
     }
@@ -715,6 +872,7 @@ export class SceneRenderer {
       this.putCell(gx, gy, d.code, d.r, d.g, d.b, 0, a);
     }
 
+    this.castShadows = G.options.shadows;
     // --------------------------------------------------------- 5. Y-Sorted Unified Drawables (Props, Entities, Remote Players)
     type DrawItem = {
       y: number;
@@ -763,7 +921,7 @@ export class SceneRenderer {
         else if (p.drink > 0) pose = 'drink';
         else if (p.atk > 0.04) pose = p.combo === 0 ? 'attack1' : p.combo === 1 ? 'attack2' : 'attack3';
         else if (p.moving) pose = 'walk';
-        const frame = pose === 'walk' ? Math.floor(p.walkT * 9) % 6 : Math.floor(t * 2.5) % 2;
+        const frame = knightAnimationFrame(pose, t, p.walkT, p.atk, weapon.speed * 0.9, p.roll);
         const spr = this.getCachedSprite(`pl:${armor.id}:${weapon.id}:${pose}:${frame}`, () =>
           buildKnightSprite(armor, weapon, pose, frame),
         );
@@ -779,7 +937,7 @@ export class SceneRenderer {
         const ey = lerp(e.prevY, e.y, alphaInterp);
         const pose = e.state === 'attack' || (e.state === 'windup' && e.st < 0.2) ? 'attack' : 'idle';
         const frame = Math.floor(e.walkT * 5) % 2;
-        const spr = this.getCachedSprite(`en:${e.type}:${pose}:${frame}`, () => buildCreatureSprite(e.type, pose, frame));
+        const spr = this.getCachedSprite(`en:${e.type}:${pose}:${frame}`, () => buildEnemySprite(e.type, pose, frame));
         const teleFlash = e.state === 'windup' && e.st < 0.28 && ((t * 18) | 0) % 2 === 0;
         const lift = e.float ? Math.round(Math.sin(t * 2.5 + e.hx) * 1.2) - 1 : 0;
         const eliteRim = e.eliteAffix ? ELITE_AFFIXES[e.eliteAffix].rimColor : null;
@@ -843,7 +1001,7 @@ export class SceneRenderer {
         if (!(this.FL[i] & 1) || (this.FL[i] & (2 | 4 | 8))) continue;
 
         // Horizontal sinusoidal water ripple shear
-        const wave = Math.sin(t * 2.1 + y * 0.42 + x * 0.05);
+        const wave = Math.sin(t * 2.1 + (y + this.camCellY) * 0.42 + (x + this.camCellX) * 0.05);
         const waveShift = Math.round(wave * 1.35);
 
         // Mirror walls, towers, trees, torches & characters standing above the water up to 28 cells!
@@ -854,19 +1012,24 @@ export class SceneRenderer {
           const sx = clamp(x + waveShift, 0, cols - 1);
           const si = sy * cols + sx;
           if (!(this.FL[si] & 1)) {
-            const mirrorY = sy - distY;
+            const mirrorY = sy - distY + 1;
             if (mirrorY >= 0) {
               const mi = mirrorY * cols + sx;
-              if (this.FL[mi] & (2 | 4 | 8)) {
+              if (this.FL[mi] & (2 | 4 | 8 | 16)) {
                 const fade = (1 - distY / 30) * 0.62;
                 // Break reflection slightly along horizontal scanline troughs
-                const scan = 0.72 + 0.28 * Math.sin(y * 1.4 + t * 2.4);
+                const scan = 0.72 + 0.28 * Math.sin((y + this.camCellY) * 1.4 + t * 2.4);
                 const k = fade * scan;
                 this.BR[i] = this.BR[i] * 0.35 + this.BR[mi] * k * 0.82;
                 this.BG[i] = this.BG[i] * 0.35 + this.BG[mi] * k * 0.92;
                 this.BB[i] = this.BB[i] * 0.35 + this.BB[mi] * k * 1.12;
+                // The reflected bank leaves a continuous cool wash between broken wave crests.
+                const wash = k * 0.36;
+                this.BGR[i] += this.BR[mi] * wash * 0.72;
+                this.BGG[i] += this.BG[mi] * wash * 0.88;
+                this.BGB[i] += this.BB[mi] * wash;
                 this.EM[i] = this.EM[mi] * k * 0.75;
-                this.CHR[i] = this.CHR[mi] > 32 ? this.CHR[mi] : 126;
+                this.CHR[i] = scan > 0.58 ? WATER_LINE + (sx & 3) : 46;
                 reflected = true;
               }
             }
@@ -887,7 +1050,7 @@ export class SceneRenderer {
               this.BG[i] = lerp(this.BG[i], 0.9 * mLum, 0.9);
               this.BB[i] = lerp(this.BB[i], 0.98 * mLum, 0.92);
               this.EM[i] = Math.max(this.EM[i], mLum * 0.85);
-              this.CHR[i] = pickRampChar(RAMP_STONE, clamp(mLum * 0.92, 0.05, 0.96), 0);
+              this.CHR[i] = WATER_LINE + Math.floor(this.HV[i] * 4);
             }
           }
         }
@@ -957,13 +1120,18 @@ export class SceneRenderer {
       this.putCell(gx, gy, 111, q.col[0], q.col[1], q.col[2], 1, 1, 0.08);
     }
     const rc = G.weather.wind > 0.5 ? 47 : 124;
-    for (const d of G.rain) {
+    for (let ri = 0; ri < G.rain.length; ri++) {
+      const d = G.rain[ri];
       const gx = Math.round(d.x * WORLD_SCALE_X) - this.camCellX;
       const gy = Math.round(d.y * WORLD_SCALE_Y) - this.camCellY;
       if (d.ash) {
         this.putCell(gx, gy, d.life % 0.4 < 0.2 ? 46 : 39, 0.65, 0.58, 0.52, 0.35, 0.72, 0.04);
       } else {
-        this.putCell(gx, gy, rc, 0.52, 0.62, 0.78, 0.22, 0.55, 0.04);
+        // Thin two-cell streaks with per-drop brightness so rain reads as depth, not a dot grid.
+        const dv = hash(ri, 0, 211);
+        const a = 0.22 + dv * 0.3;
+        this.putCell(gx, gy, rc, 0.5, 0.6, 0.76, 0.1, a, 0.03);
+        if (dv > 0.45) this.putCell(gx, gy - 1, rc, 0.42, 0.5, 0.64, 0.05, a * 0.45, 0.02);
       }
     }
     for (const f of G.fireflies) {
@@ -1031,9 +1199,12 @@ export class SceneRenderer {
       for (let x = 0; x < cols; x++) {
         const i = y * cols + x;
         const e = this.EM[i];
-        const lr = this.LR[i] * (1 - e) + e;
-        const lg = this.LG[i] * (1 - e) + e;
-        const lb = this.LB[i] * (1 - e) + e;
+        // Preserve the painted shadow planes when several camp lights overlap.
+        const painted = this.CHR[i] >= SHADED_TILE;
+        const exposure = painted ? 0.82 / (0.8 + Math.max(this.LR[i], this.LG[i], this.LB[i]) * 0.78) : 1;
+        const lr = this.LR[i] * exposure * (1 - e) + e;
+        const lg = this.LG[i] * exposure * (1 - e) + e;
+        const lb = this.LB[i] * exposure * (1 - e) + e;
 
         let r = this.BR[i] * lr;
         let g = this.BG[i] * lg;
@@ -1042,6 +1213,19 @@ export class SceneRenderer {
         let bgr = this.BGR[i] * lr;
         let bgg = this.BGG[i] * lg;
         let bgb = this.BGB[i] * lb;
+
+        // Aerial perspective: the upper screen is farther away, so it loses contrast
+        // into a cool night haze while the foreground keeps full depth.
+        const far = 1 - y / rows;
+        const haze = far * far * 0.2 * (1 - e);
+        if (haze > 0.004) {
+          r = lerp(r, 0.07, haze);
+          g = lerp(g, 0.09, haze);
+          b = lerp(b, 0.14, haze);
+          bgr = lerp(bgr, 0.03, haze);
+          bgg = lerp(bgg, 0.04, haze);
+          bgb = lerp(bgb, 0.07, haze);
+        }
 
         if (fogA > 0.02) {
           const fo = fogA * (1 - e * 0.8) * clamp(noise((this.camCellX + x) * 0.022 + t * 0.15, (this.camCellY + y) * 0.04, 9), 0, 1);
@@ -1091,7 +1275,7 @@ export class SceneRenderer {
       if (!G.player.dead) {
         labels.push({
           wx: pxInterp,
-          wy: pyInterp - 13.6,
+          wy: pyInterp - 9.6,
           text: `${G.options.playerName}`,
           color: '#f4f2ec',
           bg: 'rgba(3, 5, 8, 0.55)',
@@ -1103,7 +1287,7 @@ export class SceneRenderer {
         if (Math.abs(rp.x - pxInterp) < 34 && Math.abs(rp.y - pyInterp) < 22) {
           labels.push({
             wx: rp.x,
-            wy: rp.y - 13.6,
+            wy: rp.y - 9.6,
             text: `${rp.name}`,
             color: '#9ee2ff',
             bg: 'rgba(3, 5, 8, 0.55)',
@@ -1112,7 +1296,7 @@ export class SceneRenderer {
           if (rp.bubbleText) {
             labels.push({
               wx: rp.x,
-              wy: rp.y - 16.2,
+              wy: rp.y - 11.2,
               text: `»${rp.bubbleText}«`,
               color: '#ffffff',
               bg: 'rgba(8, 12, 20, 0.85)',
@@ -1122,16 +1306,13 @@ export class SceneRenderer {
         }
       }
 
-      for (const n of G.npcs) {
-        if (Math.abs(n.x - pxInterp) < 26 && Math.abs(n.y - pyInterp) < 16) {
-          labels.push({ wx: n.x, wy: n.y - 12.6, text: n.name, color: '#ffd98a', bg: 'rgba(3, 5, 8, 0.62)', size: 12 });
-        }
+      const npc = G.interact?.n;
+      if (npc) {
+        labels.push({ wx: npc.x, wy: npc.y - 12.6, text: npc.name, color: '#ffd98a', bg: 'rgba(3, 5, 8, 0.62)', size: 12 });
       }
-
-      for (const sp of W.signposts) {
-        if (Math.abs(sp.x - pxInterp) < 14 && Math.abs(sp.y - pyInterp) < 10) {
-          labels.push({ wx: sp.x + 0.5, wy: sp.y - 8.2, text: sp.text, color: '#e2d8c5', bg: 'rgba(3, 5, 8, 0.72)', size: 12 });
-        }
+      const sign = G.interact?.kind === 'signpost' ? G.interact.f : undefined;
+      if (sign?.text) {
+        labels.push({ wx: sign.x + 0.5, wy: sign.y - 8.2, text: sign.text, color: '#e2d8c5', bg: 'rgba(3, 5, 8, 0.72)', size: 12 });
       }
 
       for (const e of G.enemies) {
