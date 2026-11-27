@@ -246,7 +246,7 @@ function boot(): void {
     inp.wy = wpos.wy;
 
     objs.length = 0;
-    world.objectsIn(game.camera.x - 56, game.camera.y - 34, game.camera.x + 56, game.camera.y + 38, objs);
+    world.objectsIn(game.camera.x - 64, game.camera.y - 44, game.camera.x + 64, game.camera.y + 44, objs);
 
     let steps = 0;
     while (accum >= FIXED_DT && steps < 4) {
