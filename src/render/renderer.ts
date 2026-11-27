@@ -631,6 +631,8 @@ export class SceneRenderer {
             const northEl = W.elevAt(baseWx, baseWy - 1);
             if (northEl < el) relief *= 1.22;
             else if (northEl > el) relief *= 0.58;
+            // Front lip right above a cliff face catches the moon.
+            if (W.elevAt(baseWx, baseWy + 1) < el) relief *= 1.28;
           }
           if (subX === 0 && W.elevAt(baseWx - 1, baseWy) < el) relief *= 1.12;
           if (subX === WORLD_SCALE_X - 1 && W.elevAt(baseWx + 1, baseWy) < el) relief *= 0.74;
@@ -722,7 +724,14 @@ export class SceneRenderer {
 
           // Rich weathered stone heightfield (multi-octave fBM + mortar grooves + vertical AO)
           const pierLight = isArch ? 0.92 + archDepth * 0.12 : pierX < 3 ? 1.20 : pierX < 5 ? 0.59 : 0.96;
-          const ao = (0.46 + 0.58 * (fh / topH)) * pierLight;
+          // Battlements as blocks: merlons have a lit west face, a shaded east face and
+          // a bright top; the crenel floor between them sits in the merlons' shadow.
+          const mx = ((cellX % 4) + 4) % 4;
+          let blockK = 1;
+          if (fh > facadeH) blockK = mx === 0 ? 1.22 : mx === 3 ? 0.66 : 1;
+          if (isMerlon && fh === topH) blockK *= 1.14;
+          if (!isMerlon && fh >= topH - 1) blockK *= mx === 0 ? 0.62 : 0.78;
+          const ao = (0.46 + 0.58 * (fh / topH)) * pierLight * blockK;
           const weatherN = noise(cellX * 0.12, (cellY - fh) * 0.14, 71);
           const crackN = noise(cellX * 0.32, (cellY - fh) * 0.32, 97);
           const blockTint = 0.75 + hash(Math.floor((cellX + stagger) / 7), cellY - brickRow * 3, 53) * 0.46;
