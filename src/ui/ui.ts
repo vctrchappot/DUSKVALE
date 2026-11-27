@@ -4,8 +4,10 @@ import { ENEMY_DEFS, type Game, type GameUICallbacks } from '../game/game.ts';
 import { buildPlayerPortraitAscii } from '../game/pixelSprites.ts';
 import { ARMORS, RINGS, SKILLS, WEAPONS, weaponUpgradeCost, xpForNextLevel } from '../game/rpg.ts';
 import type { SkillId } from '../game/types.ts';
+import type { MultiplayerClient } from '../net/client.ts';
 import type { SceneRenderer } from '../render/renderer.ts';
 import { T, type WorldFeature } from '../world/types.ts';
+import type { TouchController } from './touch.ts';
 
 interface MenuItem {
   label: string;
@@ -15,11 +17,13 @@ interface MenuItem {
 }
 
 export class GameUI implements GameUICallbacks {
-  open: null | 'dialog' | 'menu' | 'map' | 'journal' | 'inventory' = null;
+  open: null | 'dialog' | 'menu' | 'map' | 'journal' | 'inventory' | 'chat' = null;
   debugVisible = false;
 
   private readonly G: Game;
   private readonly R: SceneRenderer;
+  private readonly net: MultiplayerClient;
+  private readonly touch: TouchController;
   private readonly onStart: (slot: number, load: boolean) => void;
   private readonly onToTitle: () => void;
 
@@ -49,11 +53,15 @@ export class GameUI implements GameUICallbacks {
   constructor(
     G: Game,
     R: SceneRenderer,
+    net: MultiplayerClient,
+    touch: TouchController,
     onStart: (slot: number, load: boolean) => void,
     onToTitle: () => void,
   ) {
     this.G = G;
     this.R = R;
+    this.net = net;
+    this.touch = touch;
     this.onStart = onStart;
     this.onToTitle = onToTitle;
     const $ = (id: string) => document.getElementById(id)!;
@@ -102,11 +110,54 @@ export class GameUI implements GameUICallbacks {
       help: $('help'),
       hurt: $('hurt'),
       debug: $('debug'),
+      chatLog: $('chatLog'),
+      chatForm: $('chatForm'),
+      chatInput: $('chatInput'),
     };
 
     this.initMapControls();
+    this.initChatControls();
     this.buildHotbar();
     this.applyUiScale();
+    this.net.onChatUpdate = () => this.renderChatLog();
+  }
+
+  private initChatControls(): void {
+    const form = this.el.chatForm as HTMLFormElement;
+    const input = this.el.chatInput as HTMLInputElement;
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (input.value.trim()) {
+        this.net.sendChat(input.value);
+      }
+      input.value = '';
+      this.closeChat();
+    });
+  }
+
+  openChat(): void {
+    if (this.open) return;
+    this.open = 'chat';
+    this.el.chatForm.classList.remove('hidden');
+    const input = this.el.chatInput as HTMLInputElement;
+    input.focus();
+  }
+
+  closeChat(): void {
+    if (this.open === 'chat') this.open = null;
+    this.el.chatForm.classList.add('hidden');
+    (this.el.chatInput as HTMLInputElement).blur();
+  }
+
+  private renderChatLog(): void {
+    const recent = this.net.chatLog.slice(-6);
+    this.el.chatLog.innerHTML = recent
+      .map((m) => {
+        const cls = m.kind === 'system' ? 'csys' : m.kind === 'emote' ? 'cemote' : 'cmsg';
+        const prefix = m.kind === 'chat' ? `<b>${m.senderName}:</b> ` : '';
+        return `<div class="${cls}">${prefix}${m.text}</div>`;
+      })
+      .join('');
   }
 
   private applyUiScale(): void {
@@ -242,7 +293,8 @@ export class GameUI implements GameUICallbacks {
       this.el.debug.textContent =
         `FPS: ${this.currentFps} | Frame: ${this.R.lastRenderMs.toFixed(1)} ms | ${gl.usingWebGL ? 'WebGL2' : '2D'}\n` +
         `Zellen: ${gl.visCols}×${gl.visRows} (${gl.cellW}×${gl.cellH}px, Zoom: ${G.options.zoom})\n` +
-        `Pos: ${p.x.toFixed(1)}, ${p.y.toFixed(1)} (H:${G.world.elevAt(p.x, p.y)}) | Chunks: ${G.world.chunks.size} | Lichter: ${this.R.lastLightCount}`;
+        `Pos: ${p.x.toFixed(1)}, ${p.y.toFixed(1)} (H:${G.world.elevAt(p.x, p.y)}) | Chunks: ${G.world.chunks.size} | Lichter: ${this.R.lastLightCount}\n` +
+        `Netz: ${this.net.mode} | Wanderer: ${this.net.peers.size + 1}${this.net.pingMs ? ` | Ping: ${this.net.pingMs}ms` : ''}`;
     }
   }
 
@@ -272,6 +324,10 @@ export class GameUI implements GameUICallbacks {
     if (G.boss) {
       const a = Math.atan2((G.boss.y - p.y) * ASP, G.boss.x - p.x);
       markers.push({ angle: a, glyph: '☠', cls: 'boss' });
+    }
+    for (const rp of this.net.getRemoteList()) {
+      const a = Math.atan2((rp.y - p.y) * ASP, rp.x - p.x);
+      markers.push({ angle: a, glyph: '◎', cls: 'peer' });
     }
 
     // Center compass on North (-PI/2) or player facing? Fixed North-up compass with relative markers is super readable!
@@ -621,6 +677,24 @@ export class GameUI implements GameUICallbacks {
           },
         },
         {
+          label: `Touch-Steuerung (Mobile): ${this.touch.enabled ? 'AN' : 'AUS'}`,
+          sub: 'Virtueller Stick & Tasten',
+          action: () => {
+            o.touchControls = !this.touch.enabled;
+            this.touch.setEnabled(o.touchControls);
+            saveAndReopen();
+          },
+        },
+        {
+          label: `Gefährten / Phantom-Wanderer: ${o.showPhantoms ? 'AN' : 'AUS'}`,
+          sub: 'MMO-Gefährten in der Welt',
+          action: () => {
+            o.showPhantoms = !o.showPhantoms;
+            this.net.setPhantomsEnabled(o.showPhantoms);
+            saveAndReopen();
+          },
+        },
+        {
           label: `Ton: ${o.muted ? 'STUMM' : `${Math.round(o.masterVol * 100)}%`}`,
           action: () => {
             o.muted = !o.muted;
@@ -965,6 +1039,16 @@ export class GameUI implements GameUICallbacks {
       const [px, py] = toS(pin.x, pin.y);
       ctx.fillStyle = '#7ad4ff';
       ctx.fillText(`✦ ${pin.label}`, px, py - 4);
+    }
+
+    // Remote players on Map 2.0
+    for (const rp of this.net.getRemoteList()) {
+      const [rx, ry] = toS(rp.x, rp.y);
+      ctx.fillStyle = '#7ed8ff';
+      ctx.beginPath();
+      ctx.arc(rx, ry, 4, 0, TAU);
+      ctx.fill();
+      ctx.fillText(rp.name, rx, ry - 7);
     }
 
     // Player dot

@@ -13,6 +13,9 @@ export interface GameOptions {
   reduceFlashes: boolean;
   targetArrow: boolean;
   mouseLookahead: boolean;
+  touchControls: boolean;
+  showPhantoms: boolean;
+  playerName: string;
   masterVol: number;
   musicVol: number;
   sfxVol: number;
@@ -41,6 +44,9 @@ export const DEFAULT_OPTIONS: GameOptions = {
   reduceFlashes: false,
   targetArrow: true,
   mouseLookahead: false,
+  touchControls: false,
+  showPhantoms: true,
+  playerName: 'Wanderer',
   masterVol: 0.75,
   musicVol: 0.7,
   sfxVol: 0.85,

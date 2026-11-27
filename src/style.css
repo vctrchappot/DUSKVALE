@@ -146,6 +146,7 @@ html, body {
 .cm.shrine { color: #ff9c3d; }
 .cm.lost { color: #ffd978; }
 .cm.boss { color: var(--blood); }
+.cm.peer { color: #7ed8ff; }
 
 /* Quest tracker top-right */
 #questBox {
@@ -484,3 +485,126 @@ html, body {
   text-transform: uppercase;
 }
 #tMenu button:hover { border-color: var(--ember); color: var(--ember); }
+
+/* Stage 3: MMO Chat */
+#chatWrap {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  width: min(320px, 42vw);
+  pointer-events: auto;
+}
+#chatLog {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.35;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+}
+#chatLog .cmsg { color: var(--fg); background: rgba(7, 8, 12, 0.58); padding: 2px 6px; }
+#chatLog .cemote { color: #9de8ff; font-style: italic; background: rgba(7, 8, 12, 0.58); padding: 2px 6px; }
+#chatLog .csys { color: var(--gold); background: rgba(7, 8, 12, 0.58); padding: 2px 6px; }
+#chatForm { margin-top: 6px; }
+#chatInput {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  padding: 6px 10px;
+  outline: none;
+}
+
+/* Stage 3: Mobile & Portrait Touch Controls */
+#touchControls {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+#touchStickZone {
+  position: absolute;
+  left: 22px;
+  bottom: 28px;
+  width: 124px;
+  height: 124px;
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#touchStickBase {
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  background: rgba(10, 12, 18, 0.55);
+  border: 1.5px solid rgba(235, 227, 210, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#touchStickKnob {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(245, 166, 72, 0.72);
+  border: 1.5px solid #ffe2a8;
+}
+#touchActions {
+  position: absolute;
+  right: 18px;
+  bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: auto;
+  touch-action: none;
+}
+.tSkillRow, .tMainRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.tBtn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(10, 12, 18, 0.78);
+  border: 1.5px solid var(--line);
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tBtn.small {
+  width: 36px;
+  height: 36px;
+  font-size: 12px;
+}
+.tBtn.primary {
+  width: 60px;
+  height: 60px;
+  font-size: 22px;
+  border-color: var(--ember);
+  background: rgba(245, 166, 72, 0.28);
+  color: #ffe2a8;
+}
+
+@media (max-width: 760px) {
+  #portrait { display: none; }
+  #playerPanel { left: 8px; top: 8px; padding: 6px 8px; }
+  #pBars { min-width: 130px; }
+  #compass { top: 68px; width: 90vw; }
+  #questBox { right: 8px; top: 8px; max-width: 165px; padding: 6px 8px; font-size: 11px; }
+  #onboarding, #chatWrap { display: none; }
+  #bottomBar { bottom: 160px; }
+  #hotbar { gap: 3px; }
+  .hslot { width: 34px; height: 34px; }
+  #right { display: none; }
+}

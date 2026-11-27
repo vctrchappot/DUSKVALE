@@ -3,9 +3,12 @@ import { AudioEngine } from './engine/audio.ts';
 import { clearOneShotInputs, createInputState, pollGamepad } from './engine/input.ts';
 import { loadOptions, ZOOM_PX } from './engine/options.ts';
 import { Game } from './game/game.ts';
+import type { AnimPose } from './game/pixelSprites.ts';
+import { MultiplayerClient } from './net/client.ts';
 import { SceneRenderer } from './render/renderer.ts';
+import { TouchController } from './ui/touch.ts';
 import { GameUI } from './ui/ui.ts';
-import type { WorldObject } from './world/types.ts';
+import type { Chunk, WorldObject } from './world/types.ts';
 import { World } from './world/world.ts';
 
 const FIXED_DT = 1 / 60;
@@ -15,10 +18,34 @@ function boot(): void {
   const world = new World();
   const audio = new AudioEngine();
   const game = new Game(world, audio, options);
+  const net = new MultiplayerClient(options.playerName);
+  net.setPhantomsEnabled(options.showPhantoms);
+
+  // Optional Web Worker chunk prefetcher so exploration stays 60fps
+  let chunkWorker: Worker | null = null;
+  const workerRequested = new Set<string>();
+  try {
+    chunkWorker = new Worker(new URL('./world/chunkWorker.ts', import.meta.url), { type: 'module' });
+    chunkWorker.onmessage = (ev: MessageEvent<Chunk>) => {
+      world.injectChunk(ev.data);
+    };
+  } catch {
+    chunkWorker = null;
+  }
 
   const screenCv = document.getElementById('screen') as HTMLCanvasElement;
   const overlayCv = document.getElementById('overlay') as HTMLCanvasElement;
   const renderer = new SceneRenderer(screenCv, overlayCv, ZOOM_PX[options.zoom]);
+
+  const inp = createInputState();
+  const touchRoot = document.getElementById('touchControls') as HTMLElement;
+  const touch = new TouchController(touchRoot, inp, {
+    onInteract: () => {
+      if (game.interact && !game.player.dead) game.interactNow();
+    },
+    onSkill: (slot) => game.useSkill(slot),
+  });
+  if (options.touchControls) touch.setEnabled(true);
 
   const startGame = (slot: number, load: boolean) => {
     audio.init(game.options);
@@ -30,6 +57,8 @@ function boot(): void {
       game.newGame(slot);
     }
     ui.title(false);
+    const params = new URLSearchParams(location.search);
+    net.connect(params.get('server'));
     if (!saveData) {
       ui.banner('DUSKVALE', 'Trage die letzte Glut durch die ewige Dämmerung.', 'title', 4.5);
     }
@@ -38,15 +67,15 @@ function boot(): void {
   const toTitle = () => {
     game.mode = 'title';
     game.resetWorldEnemies();
+    net.disconnect();
     ui.death(false);
     ui.title(true);
   };
 
-  const ui = new GameUI(game, renderer, startGame, toTitle);
+  const ui = new GameUI(game, renderer, net, touch, startGame, toTitle);
   game.ui = ui;
   ui.title(true);
 
-  const inp = createInputState();
   const MOVE_KEYS: Record<string, 'up' | 'down' | 'left' | 'right'> = {
     KeyW: 'up',
     ArrowUp: 'up',
@@ -62,6 +91,13 @@ function boot(): void {
     if (e.code === 'F3') {
       e.preventDefault();
       ui.debugVisible = !ui.debugVisible;
+      return;
+    }
+    if (ui.open === 'chat') {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        ui.closeChat();
+      }
       return;
     }
     if (e.repeat && !MOVE_KEYS[e.code]) return;
@@ -112,6 +148,10 @@ function boot(): void {
     }
 
     switch (e.code) {
+      case 'KeyT':
+        e.preventDefault();
+        ui.openChat();
+        break;
       case 'Space':
       case 'ShiftLeft':
       case 'ShiftRight':
@@ -214,6 +254,7 @@ function boot(): void {
 
   window.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('resize', () => renderer.resize());
+  window.addEventListener('beforeunload', () => net.disconnect());
 
   // Dev / Playwright shortcut: #play or #play:x,y
   const hashMatch = /^#play(?::(-?\d+),(-?\d+))?$/.exec(location.hash);
@@ -230,9 +271,9 @@ function boot(): void {
     }
   }
 
-  // Fixed 60 Hz simulation + interpolated rendering loop
   let last = performance.now();
   let accum = 0;
+  let prefetchT = 0;
   const objs: WorldObject[] = [];
 
   function frame(now: number): void {
@@ -244,6 +285,23 @@ function boot(): void {
     const wpos = renderer.screenToWorld(inp.mx, inp.my);
     inp.wx = wpos.wx;
     inp.wy = wpos.wy;
+
+    // Background Web Worker chunk prefetching around camera
+    prefetchT -= frameDt;
+    if (chunkWorker && prefetchT <= 0) {
+      prefetchT = 0.4;
+      const ccx = Math.floor(game.camera.x) >> 5;
+      const ccy = Math.floor(game.camera.y) >> 5;
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const key = `${ccx + dx},${ccy + dy}`;
+          if (!world.chunks.has(key) && !workerRequested.has(key)) {
+            workerRequested.add(key);
+            chunkWorker.postMessage({ cx: ccx + dx, cy: ccy + dy });
+          }
+        }
+      }
+    }
 
     objs.length = 0;
     world.objectsIn(game.camera.x - 64, game.camera.y - 44, game.camera.x + 64, game.camera.y + 44, objs);
@@ -259,9 +317,34 @@ function boot(): void {
       steps++;
     }
 
+    // Update Multiplayer / Co-op state
+    if (game.mode === 'play') {
+      const p = game.player;
+      let pose: AnimPose = 'idle';
+      if (p.roll > 0) pose = 'roll';
+      else if (p.parry > 0) pose = 'parry';
+      else if (p.drink > 0) pose = 'drink';
+      else if (p.atk > 0.04) pose = p.combo === 0 ? 'attack1' : p.combo === 1 ? 'attack2' : 'attack3';
+      else if (p.moving) pose = 'walk';
+      const fr = pose === 'walk' ? Math.floor(p.walkT * 9) % 6 : Math.floor(game.t * 2.5) % 2;
+
+      net.update(frameDt, {
+        x: p.x,
+        y: p.y,
+        face: p.face,
+        lvl: p.lvl,
+        hp: p.hp,
+        maxHp: game.maxHp(),
+        weaponId: p.weaponId,
+        armorId: p.armorId,
+        pose,
+        frame: fr,
+      });
+    }
+
     const alpha = accum / FIXED_DT;
     game.collectLights(objs);
-    renderer.render(game, objs, alpha);
+    renderer.render(game, objs, alpha, game.mode === 'play' ? net.getRemoteList() : []);
     ui.update(frameDt);
     requestAnimationFrame(frame);
   }

@@ -4,6 +4,7 @@ import { WebGLAsciiRenderer } from '../engine/webgl.ts';
 import type { EnemyEntity, Game, NpcEntity } from '../game/game.ts';
 import { buildCreatureSprite, buildKnightSprite, buildPropSprite, type AnimPose, type PixelSprite } from '../game/pixelSprites.ts';
 import { ARMORS, WEAPONS } from '../game/rpg.ts';
+import type { RemotePlayerEntity } from '../net/client.ts';
 import { T, WATERY, type TerrainId, type WorldObject } from '../world/types.ts';
 
 // Decoupled World -> ASCII scale (4x2 cells per tile = visually square world tiles!)
@@ -350,7 +351,7 @@ export class SceneRenderer {
     this.drawPixelSprite(spr, o.x + 0.5, o.y + 0.5, { alpha, swayX });
   }
 
-  render(G: Game, objs: WorldObject[], alphaInterp: number): void {
+  render(G: Game, objs: WorldObject[], alphaInterp: number, remotePlayers: RemotePlayerEntity[] = []): void {
     const t0 = performance.now();
     const cols = this.gl.gridCols;
     const rows = this.gl.gridRows;
@@ -706,6 +707,7 @@ export class SceneRenderer {
       o?: WorldObject;
       e?: EnemyEntity;
       n?: NpcEntity;
+      rp?: RemotePlayerEntity;
       isPlayer?: boolean;
       pk?: { x: number; y: number; amount: number };
     };
@@ -713,6 +715,7 @@ export class SceneRenderer {
     for (const o of objs) drawables.push({ y: o.y, x: o.x, o });
     for (const e of G.enemies) drawables.push({ y: e.y, x: e.x, e });
     for (const n of G.npcs) drawables.push({ y: n.y, x: n.x, n });
+    for (const rp of remotePlayers) drawables.push({ y: rp.y, x: rp.x, rp });
     for (const pk of G.pickups) drawables.push({ y: pk.y, x: pk.x, pk });
     if (G.mode !== 'title' && !G.player.dead) {
       drawables.push({ y: pyInterp, x: pxInterp, isPlayer: true });
@@ -722,6 +725,19 @@ export class SceneRenderer {
     for (const d of drawables) {
       if (d.o) {
         this.drawWorldObject(d.o, G, playerCellX, playerCellY);
+      } else if (d.rp) {
+        const rp = d.rp;
+        const armor = ARMORS[rp.armorId] || ARMORS.sentinel_mail;
+        const weapon = WEAPONS[rp.weaponId] || WEAPONS.iron_sword;
+        const spr = this.getCachedSprite(`pl:${armor.id}:${weapon.id}:${rp.pose}:${rp.frame}`, () =>
+          buildKnightSprite(armor, weapon, rp.pose, rp.frame),
+        );
+        this.drawPixelSprite(spr, rp.x, rp.y, {
+          flip: rp.face < 0,
+          alpha: rp.isPhantom ? 0.92 : 1,
+          rim: [0.45, 0.86, 1.0],
+          isEntity: true,
+        });
       } else if (d.isPlayer) {
         const p = G.player;
         const armor = ARMORS[p.armorId] || ARMORS.wanderer_plate;
@@ -948,10 +964,32 @@ export class SceneRenderer {
         labels.push({
           wx: pxInterp,
           wy: pyInterp - 10.2,
-          text: `Wanderer · St. ${G.player.lvl}`,
+          text: `${G.options.playerName} · St. ${G.player.lvl}`,
           color: '#f2e6cf',
           size: 12,
         });
+      }
+
+      for (const rp of remotePlayers) {
+        if (Math.abs(rp.x - pxInterp) < 34 && Math.abs(rp.y - pyInterp) < 22) {
+          labels.push({
+            wx: rp.x,
+            wy: rp.y - 10.2,
+            text: `${rp.name}${rp.title ? ` <${rp.title}>` : ''} · St. ${rp.lvl}`,
+            color: '#7ed8ff',
+            size: 12,
+          });
+          if (rp.bubbleText) {
+            labels.push({
+              wx: rp.x,
+              wy: rp.y - 12.6,
+              text: `»${rp.bubbleText}«`,
+              color: '#ffffff',
+              bg: 'rgba(12, 18, 28, 0.88)',
+              size: 12,
+            });
+          }
+        }
       }
 
       for (const n of G.npcs) {

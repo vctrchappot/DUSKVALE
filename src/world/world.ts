@@ -525,6 +525,13 @@ export class World {
     return c;
   }
 
+  injectChunk(c: Chunk): void {
+    const k = `${c.cx},${c.cy}`;
+    if (!this.chunks.has(k)) {
+      this.chunks.set(k, c);
+    }
+  }
+
   chunkAtCell(x: number, y: number): Chunk {
     const cx = x >> 5;
     const cy = y >> 5;

@@ -34,8 +34,14 @@ Dev-Shortcut: `/#play` startet sofort, `/#play:64,-32` startet direkt an der **B
 | 1–4 | Glut-Fähigkeiten (Flammenhieb, Glutbolzen, Ascheschild, Sprungangriff) |
 | Q / 5 | Glutflakon trinken |
 | E | interagieren, rasten, lesen, handeln |
-| I / J / M | Inventar · Journal · Karte 2.0 (Zoom/Pan/Pins) |
-| +/− · F3 · H · Esc | Zoom (Nah/Mittel/Fern) · Debug-Overlay · Hilfe · Pause & Optionen |
+| I / J / M / T | Inventar · Journal · Karte 2.0 · Multiplayer-Chat & Emotes (`/wave`, `/rest`, `/cheer`) |
+| +/− · F3 · H · Esc | Zoom (Nah/Mittel/Fern) · Debug-Overlay · Hilfe · Pause & Optionen (inkl. Touch-Steuerung) |
+
+## Multiplayer & Mobile (Stage 3)
+
+- **Lokaler Co-op**: Einfach zwei Browser-Tabs öffnen — Spieler synchronisieren sich automatisch über `BroadcastChannel`.
+- **WebSocket-Server**: Mit `?server=ws://localhost:8787` an den Raum-Server in `server/multiplayer.ts` (kompatibel mit Cloudflare Durable Objects) andocken.
+- **Mobile & Hochformat**: Touch-Joystick & Aktions-Buttons aktivieren sich automatisch auf Touch-Geräten oder manuell unter **Esc → Optionen → Touch-Steuerung**.
 
 ## Architektur (Stage 2)
 
